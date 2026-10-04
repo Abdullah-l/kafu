@@ -121,12 +121,12 @@ export async function handleAccountMessage(
     return true;
   }
 
-  if (lower === "login" || lower === "connect") {
+  if (lower === "login") {
     await sendLoginLink(userId, io, !isDirectMessage, true);
     return true;
   }
 
-  if (lower === "logout" || lower === "disconnect") {
+  if (lower === "logout") {
     cancelLogin(loginKey(userId));
     const had = await clearUserToken(userId);
     await respond(had
@@ -196,7 +196,7 @@ export async function handleAccountMessage(
     return true;
   }
 
-  if (isDirectMessage && hasPendingLogin(loginKey(userId))) {
+  if (isDirectMessage && hasPendingLogin(loginKey(userId)) && !(await getUser(userId))?.token) {
     await io.dm("Finish connecting first: paste the code Claude showed you, or send `login` for a new link.");
     return true;
   }

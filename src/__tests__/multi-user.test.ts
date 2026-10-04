@@ -152,3 +152,32 @@ describe("credential connect flow", () => {
     }
   });
 });
+
+describe("account command routing", () => {
+  test("connect lists services instead of starting a Claude sign-in, and logged-in users aren't blocked", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kafu-route-"));
+    try {
+      await Bun.write(join(dir, ".claude/kafu/settings.json"), JSON.stringify({
+        multiUser: { enabled: true, credentials: [{ id: "linear", label: "Linear", env: "LINEAR_API_KEY", help: "", pattern: "" }] },
+      }));
+      const out = await runInDir(dir, `
+        process.env.KAFU_SECRET_KEY = Buffer.alloc(32, 9).toString("base64");
+        const c = await import(${JSON.stringify(join(SRC, "config.ts"))});
+        await c.loadSettings();
+        const a = await import(${JSON.stringify(join(SRC, "commands/slack-accounts.ts"))});
+        const u = await import(${JSON.stringify(join(SRC, "users.ts"))});
+        await u.saveUserToken("U2", "sk-ant-oat01-" + "x".repeat(40));
+        const log = [];
+        const io = { dm: async (t) => log.push(t), reply: async (t) => log.push(t) };
+        await a.handleAccountMessage("U2", "connect", true, io);
+        const disconnectHandled = await a.handleAccountMessage("U2", "disconnect", true, io);
+        const stillLoggedIn = !!(await u.getUser("U2")).token;
+        const hiHandled = await a.handleAccountMessage("U2", "hi", true, io);
+        console.log(JSON.stringify({ listed: log[0].startsWith("Your connections:"), noSignIn: !log.some((l) => l.includes("sign-in link")), disconnectHandled, stillLoggedIn, hiHandled }));
+      `);
+      expect(JSON.parse(out)).toEqual({ listed: true, noSignIn: true, disconnectHandled: false, stillLoggedIn: true, hiHandled: false });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
