@@ -469,7 +469,7 @@ export async function start(args: string[] = []) {
     if (triggerResult.exitCode !== 0) {
       console.error(`[${ts()}] Startup trigger failed (exit ${triggerResult.exitCode}). Daemon will continue running.`);
     }
-  } else {
+  } else if (!currentSettings.multiUser.enabled) {
     await bootstrap();
   }
 

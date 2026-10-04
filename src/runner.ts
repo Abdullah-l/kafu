@@ -85,8 +85,9 @@ function cleanSpawnEnv(): Record<string, string> {
 
 function identitySpawnEnv(identity: RunIdentity): Record<string, string> {
   const env = cleanSpawnEnv();
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_AUTH_TOKEN;
+  for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "KAFU_SECRET_KEY", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "TELEGRAM_TOKEN"]) {
+    delete env[key];
+  }
   env.CLAUDE_CODE_OAUTH_TOKEN = identity.token;
   env.CLAUDE_CONFIG_DIR = identity.configDir;
   return env;

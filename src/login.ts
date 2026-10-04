@@ -48,7 +48,7 @@ function loginEnv(configDir: string): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === "string") env[key] = value;
   }
-  for (const key of ["CLAUDECODE", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]) {
+  for (const key of ["CLAUDECODE", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "KAFU_SECRET_KEY", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "TELEGRAM_TOKEN"]) {
     delete env[key];
   }
   env.CLAUDE_CONFIG_DIR = configDir;
