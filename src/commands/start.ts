@@ -14,7 +14,7 @@ import { PluginManager, setPluginManager } from "../plugins";
 const CLAUDE_DIR = join(process.cwd(), ".claude");
 const STATUSLINE_FILE = join(CLAUDE_DIR, "statusline.cjs");
 const CLAUDE_SETTINGS_FILE = join(CLAUDE_DIR, "settings.json");
-const PREFLIGHT_SCRIPT = fileURLToPath(new URL("../preflight.ts", import.meta.url));
+const WHISPER_WARMUP_SCRIPT = fileURLToPath(new URL("../whisper-warmup.ts", import.meta.url));
 
 const STATUSLINE_SCRIPT = `#!/usr/bin/env node
 const { readFileSync } = require("fs");
@@ -422,17 +422,16 @@ export async function start(args: string[] = []) {
 
   function ts() { return new Date().toLocaleTimeString(); }
 
-  function startPreflightInBackground(projectPath: string): void {
+  function startWhisperWarmupInBackground(): void {
     try {
-      const proc = Bun.spawn([process.execPath, "run", PREFLIGHT_SCRIPT, projectPath], {
+      const proc = Bun.spawn([process.execPath, "run", WHISPER_WARMUP_SCRIPT], {
         stdin: "ignore",
         stdout: "inherit",
         stderr: "inherit",
       });
       proc.unref();
-      console.log(`[${ts()}] Plugin preflight started in background`);
     } catch (err) {
-      console.error(`[${ts()}] Failed to start plugin preflight:`, err);
+      console.error(`[${ts()}] Failed to start whisper warmup:`, err);
     }
   }
 
@@ -473,7 +472,7 @@ export async function start(args: string[] = []) {
     await bootstrap();
   }
 
-  startPreflightInBackground(process.cwd());
+  startWhisperWarmupInBackground();
 
   setInterval(async () => {
     try {
