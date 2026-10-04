@@ -106,4 +106,4 @@ bun test
 
 ## License
 
-MIT. Kafu started as a fork of [claudeclaw](https://github.com/moazbuilds/claudeclaw).
+MIT. See [LICENSE](LICENSE).
