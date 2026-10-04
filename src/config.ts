@@ -60,6 +60,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
   slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false },
+  multiUser: { enabled: false, mcpConfig: "" },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
@@ -89,6 +90,11 @@ export interface SlackConfig {
   assistantStatus: boolean;
 }
 
+export interface MultiUserConfig {
+  enabled: boolean;
+  mcpConfig: string;
+}
+
 export type SecurityLevel =
   | "locked"
   | "strict"
@@ -116,6 +122,7 @@ export interface Settings {
   timezoneOffsetMinutes: number;
   telegram: TelegramConfig;
   slack: SlackConfig;
+  multiUser: MultiUserConfig;
   security: SecurityConfig;
   web: WebConfig;
   stt: SttConfig;
@@ -268,6 +275,10 @@ function parseSettings(raw: Record<string, any>): Settings {
       allowBots: Array.isArray(raw.slack?.allowBots) ? raw.slack.allowBots.map(String) : [],
       allowBotIds: Array.isArray(raw.slack?.allowBotIds) ? raw.slack.allowBotIds.map(String) : [],
       assistantStatus: raw.slack?.assistantStatus === true,
+    },
+    multiUser: {
+      enabled: raw.multiUser?.enabled === true,
+      mcpConfig: typeof raw.multiUser?.mcpConfig === "string" ? raw.multiUser.mcpConfig.trim() : "",
     },
     security: {
       level,

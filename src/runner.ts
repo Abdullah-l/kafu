@@ -30,6 +30,7 @@ import { selectModel } from "./model-router";
 import { FAST_MODEL } from "./models";
 import { recordResult, abortReason, clearSession, startSession } from "./watchdog";
 import { getPluginManager, type EventContext } from "./plugins";
+import type { RunIdentity } from "./users";
 
 const LOGS_DIR = join(process.cwd(), ".claude/kafu/logs");
 const ACTIVE_RUNS_FILE = join(process.cwd(), ".claude/kafu/active-runs");
@@ -63,7 +64,7 @@ function resolveClaudeExecutable(): string {
     return "claude";
   }
 }
-const CLAUDE_EXECUTABLE = resolveClaudeExecutable();
+export const CLAUDE_EXECUTABLE = resolveClaudeExecutable();
 
 const COMPACT_WARN_THRESHOLD = 25;
 const COMPACT_TIMEOUT_ENABLED = true;
@@ -80,6 +81,21 @@ function cleanSpawnEnv(): Record<string, string> {
     if (typeof value === "string") out[key] = value;
   }
   return out;
+}
+
+function identitySpawnEnv(identity: RunIdentity): Record<string, string> {
+  const env = cleanSpawnEnv();
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  env.CLAUDE_CODE_OAUTH_TOKEN = identity.token;
+  env.CLAUDE_CONFIG_DIR = identity.configDir;
+  return env;
+}
+
+function sharedMcpConfigPath(): string | null {
+  const configured = getSettings().multiUser.mcpConfig;
+  const path = configured ? resolve(process.cwd(), configured) : join(process.cwd(), ".mcp.json");
+  return existsSync(path) ? path : null;
 }
 
 export type CompactEvent =
@@ -911,8 +927,10 @@ async function execClaude(
   timeoutCategory?: string,
   onChunk?: (text: string) => void,
   onToolEvent?: (line: string) => void,
-  cancelKey?: string
+  cancelKey?: string,
+  identity?: RunIdentity
 ): Promise<RunResult> {
+  if (identity && !threadId) throw new Error("Per-user runs require a thread session key");
   mainRunCount++;
   persistRunCount();
   try {
@@ -935,10 +953,11 @@ async function execClaude(
   const isNew = !existing;
   if (existing) startSession(existing.sessionId);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const logFile = join(LOGS_DIR, `${name}-${timestamp}.log`);
+  const logFile = join(LOGS_DIR, identity ? `${name}-${identity.userId}-${timestamp}.log` : `${name}-${timestamp}.log`);
 
   const settings = getSettings();
-  const { security, model, api, fallback, agentic, watchdog } = settings;
+  const { security, model, fallback, agentic, watchdog } = settings;
+  const api = identity ? "" : settings.api;
 
   let primaryConfig: ModelConfig;
   let taskType = "unknown";
@@ -947,6 +966,8 @@ async function execClaude(
   if (modelOverride) {
     primaryConfig = { model: modelOverride, api };
     console.log(`[${new Date().toLocaleTimeString()}] Model override: ${modelOverride}`);
+  } else if (identity?.model) {
+    primaryConfig = { model: identity.model, api };
   } else if (agentic.enabled) {
     const routing = selectModel(prompt, agentic.modes, agentic.defaultMode);
     primaryConfig = { model: routing.model, api };
@@ -961,13 +982,13 @@ async function execClaude(
 
   const fallbackConfig: ModelConfig = {
     model: fallback?.model ?? "",
-    api: fallback?.api ?? "",
+    api: identity ? "" : fallback?.api ?? "",
   };
   const securityArgs = buildSecurityArgs(security);
   const timeoutMs = timeoutMsOverride ?? resolveTimeoutMs(timeoutCategory ?? name);
 
   console.log(
-    `[${new Date().toLocaleTimeString()}] Running: ${name} (${isNew ? "new session" : `resume ${existing.sessionId.slice(0, 8)}`}, security: ${security.level}, timeout: ${timeoutMs / 60_000}m)`
+    `[${new Date().toLocaleTimeString()}] Running: ${name}${identity ? ` as ${identity.userId}` : ""} (${isNew ? "new session" : `resume ${existing.sessionId.slice(0, 8)}`}, security: ${security.level}, timeout: ${timeoutMs / 60_000}m)`
   );
 
   const pm = getPluginManager();
@@ -975,6 +996,12 @@ async function execClaude(
   if (pm) await pm.emit("before_agent_start", { prompt }, ctx);
 
   const args = [CLAUDE_EXECUTABLE, "-p", prompt, "--output-format", "stream-json", "--verbose", ...securityArgs];
+  const mcpArgs: string[] = [];
+  if (identity) {
+    const mcpPath = sharedMcpConfigPath();
+    if (mcpPath) mcpArgs.push("--mcp-config", mcpPath);
+  }
+  args.push(...mcpArgs);
 
   if (!isNew) {
     args.push("--resume", existing.sessionId);
@@ -1006,7 +1033,7 @@ async function execClaude(
     args.push("--append-system-prompt", appendParts.join("\n\n"));
   }
 
-  const baseEnv = cleanSpawnEnv();
+  const baseEnv = identity ? identitySpawnEnv(identity) : cleanSpawnEnv();
   const spawnCwd = agentName ? await ensureAgentDir(agentName) : undefined;
 
   let exec = await runClaudeStream(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs, spawnCwd, onChunk, onToolEvent, cancelKey);
@@ -1018,7 +1045,7 @@ async function execClaude(
       `[${new Date().toLocaleTimeString()}] Claude limit reached; retrying with fallback${fallbackConfig.model ? ` (${fallbackConfig.model})` : ""}...`
     );
     const fallbackSession = await getFallbackSession(agentName, threadId);
-    const fallbackArgs = [CLAUDE_EXECUTABLE, "-p", prompt, "--output-format", "stream-json", "--verbose", ...securityArgs];
+    const fallbackArgs = [CLAUDE_EXECUTABLE, "-p", prompt, "--output-format", "stream-json", "--verbose", ...securityArgs, ...mcpArgs];
     if (fallbackSession) {
       fallbackArgs.push("--resume", fallbackSession.sessionId);
     }
@@ -1139,7 +1166,7 @@ async function execClaude(
 
   const rateLimitMessage = extractRateLimitMessage(rawStdout, stderr);
 
-  if (rateLimitMessage) {
+  if (rateLimitMessage && !identity) {
     stdout = rateLimitMessage;
     const resetTime = parseRateLimitResetTime(rateLimitMessage);
     rateLimitResetAt = resetTime ?? (Date.now() + 60 * 60_000);
@@ -1148,6 +1175,8 @@ async function execClaude(
       `[${new Date().toLocaleTimeString()}] Rate limit detected. Reset at: ${new Date(rateLimitResetAt).toISOString()}`
     );
   }
+
+  if (rateLimitMessage && identity) stdout = rateLimitMessage;
 
   if (!rateLimitMessage && exitCode !== 0 && !stdout && stderr) {
     stdout = stderr;
@@ -1289,9 +1318,10 @@ export async function run(
   timeoutCategory?: string,
   onChunk?: (text: string) => void,
   onToolEvent?: (line: string) => void,
-  cancelKey?: string
+  cancelKey?: string,
+  identity?: RunIdentity
 ): Promise<RunResult> {
-  return enqueue(() => execClaude(name, prompt, threadId, modelOverride, timeoutMs, agentName, timeoutCategory, onChunk, onToolEvent, cancelKey), threadId);
+  return enqueue(() => execClaude(name, prompt, threadId, modelOverride, timeoutMs, agentName, timeoutCategory, onChunk, onToolEvent, cancelKey, identity), threadId);
 }
 
 async function streamClaude(
@@ -1505,9 +1535,10 @@ export async function runUserMessage(
   onChunk?: (text: string) => void,
   onToolEvent?: (line: string) => void,
   modelOverride?: string,
-  cancelKey?: string
+  cancelKey?: string,
+  identity?: RunIdentity
 ): Promise<RunResult> {
-  return run(name, prefixUserMessageWithClock(prompt), threadId, modelOverride, undefined, agentName, undefined, onChunk, onToolEvent, cancelKey);
+  return run(name, prefixUserMessageWithClock(prompt), threadId, modelOverride, undefined, agentName, undefined, onChunk, onToolEvent, cancelKey, identity);
 }
 
 const CLAUDE_SESSIONS_DIR = join(

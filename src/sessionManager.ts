@@ -1,4 +1,5 @@
 import { join } from "path";
+import { rename } from "fs/promises";
 
 const KAFU_DIR = join(process.cwd(), ".claude", "kafu");
 const SESSIONS_FILE = join(KAFU_DIR, "sessions.json");
@@ -17,21 +18,33 @@ interface SessionsData {
 }
 
 let sessionsCache: SessionsData | null = null;
+let loading: Promise<SessionsData> | null = null;
+let saveChain: Promise<void> = Promise.resolve();
+let saveCounter = 0;
 
 async function loadSessions(): Promise<SessionsData> {
   if (sessionsCache) return sessionsCache;
-  try {
-    sessionsCache = await Bun.file(SESSIONS_FILE).json();
+  loading ??= (async () => {
+    try {
+      sessionsCache = await Bun.file(SESSIONS_FILE).json();
+    } catch {
+      sessionsCache = { threads: {} };
+    }
+    if (!sessionsCache!.threads) sessionsCache!.threads = {};
     return sessionsCache!;
-  } catch {
-    sessionsCache = { threads: {} };
-    return sessionsCache;
-  }
+  })();
+  return loading;
 }
 
 async function saveSessions(data: SessionsData): Promise<void> {
   sessionsCache = data;
-  await Bun.write(SESSIONS_FILE, JSON.stringify(data, null, 2) + "\n");
+  const write = async () => {
+    const tmp = `${SESSIONS_FILE}.${process.pid}.${++saveCounter}.tmp`;
+    await Bun.write(tmp, JSON.stringify(sessionsCache, null, 2) + "\n");
+    await rename(tmp, SESSIONS_FILE);
+  };
+  saveChain = saveChain.then(write, write);
+  await saveChain;
 }
 
 export async function getThreadSession(

@@ -5,6 +5,7 @@ Kafu (كفو, "dependable") runs Claude Code as a daemon you talk to from Slack,
 ## Features
 
 - **Slack** over Socket Mode: DMs, @mentions, per-thread sessions, live progress message with a Stop button, file uploads, reactions
+- **Multi-user Slack** (opt-in): one bot for a whole team, each person signs in with their own Claude subscription
 - **Telegram**: DMs and groups, voice transcription (whisper.cpp), images, per-chat model switching
 - **Web UI**: chat, session history, usage, runtime info
 - **Models**: Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 4.5, or any Claude model ID; optional fallback model and keyword-based routing
@@ -64,6 +65,26 @@ Allowlists are fail-closed: an empty `allowedUserIds` blocks everyone. See `comm
 2. Bot scopes: `app_mentions:read`, `chat:write`, `channels:history`, `groups:history`, `im:history`, `im:write`, `reactions:write`, `files:read`, `files:write`.
 3. Events: `app_mention`, `message.im`, `message.channels`, `message.groups`. Enable **Interactivity** for the Stop button.
 4. Install to the workspace and copy the `xoxb-` bot token.
+
+## Multi-user Slack
+
+Off by default. Turn it on to share one Slack bot across a team, with every request running on the requester's own Claude subscription:
+
+```json
+{
+  "multiUser": { "enabled": true, "mcpConfig": ".mcp.json" },
+  "slack": { "allowedUserIds": ["*"] }
+}
+```
+
+- The first time someone talks to the bot, it DMs them a Claude sign-in link (the official `claude setup-token` flow). They approve, paste the code back in the DM, and they're connected.
+- Each person gets their own long-lived token (stored encrypted in `.claude/kafu/users/`), their own Claude config folder (history, personal settings), and their own sessions. Nobody's run ever uses someone else's account or the operator's login.
+- MCP servers in `multiUser.mcpConfig` (default: the project's `.mcp.json`) are shared by everyone. Personal MCP servers live in each user's own config folder.
+- Runs are fully parallel across people and threads. If two people talk in the same thread, each gets their own session, seeded with the thread history.
+- DM commands: `login`, `logout`, `whoami`, `model`, `model <fable|opus|sonnet|haiku|default>`. Only the person who started a run can press its Stop button. `/reset` only clears your own sessions.
+- `allowedUserIds: ["*"]` lets anyone in the workspace use it; list member IDs to restrict it.
+- The encryption key is generated at `.claude/kafu/secret.key`, or set `KAFU_SECRET_KEY` (32 bytes, base64) to keep it out of the project folder.
+- In the Slack app, enable the **Messages** tab under App Home so people can DM the bot.
 
 ## CLI
 

@@ -94,9 +94,11 @@ Ask for confirmation with **AskUserQuestion**, then write the defaults:
 | `timezone` | string | IANA name or UTC offset |
 | `slack.botToken` | string | Bot User OAuth Token (`xoxb-...`) |
 | `slack.appToken` | string | Socket Mode App-Level Token (`xapp-...`) |
-| `slack.allowedUserIds` | string[] | Slack member IDs allowed to talk to the bot |
+| `slack.allowedUserIds` | string[] | Slack member IDs allowed to talk to the bot (`"*"` = everyone) |
 | `slack.listenChannels` | string[] | Channels answered without an @mention |
 | `slack.allowBots` | string[] | Channels where other bots' messages are passed through |
+| `multiUser.enabled` | boolean | Each Slack user signs in with their own Claude account (DM `login`) |
+| `multiUser.mcpConfig` | string | Shared MCP config for all users (default `.mcp.json`) |
 | `telegram.token` | string | Bot token from @BotFather |
 | `telegram.allowedUserIds` | number[] | Telegram user IDs allowed to talk to the bot |
 | `telegram.dmIsolation` | string | `shared` (default) or `perUser` sessions for DMs |
