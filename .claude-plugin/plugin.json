@@ -1,0 +1,5 @@
+{
+  "name": "kafu",
+  "version": "1.0.0",
+  "description": "Run Claude Code as a Slack and Telegram bot"
+}

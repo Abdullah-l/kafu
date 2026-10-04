@@ -1,0 +1,21 @@
+{
+  "name": "kafu",
+  "owner": {
+    "name": "Abdullah-l"
+  },
+  "plugins": [
+    {
+      "name": "kafu",
+      "source": "./",
+      "description": "Run Claude Code as a Slack and Telegram bot",
+      "version": "1.0.0",
+      "keywords": [
+        "slack",
+        "telegram",
+        "daemon",
+        "claude-code"
+      ],
+      "category": "productivity"
+    }
+  ]
+}
