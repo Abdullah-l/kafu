@@ -173,9 +173,12 @@ describe("account command routing", () => {
         const disconnectHandled = await a.handleAccountMessage("U2", "disconnect", true, io);
         const stillLoggedIn = !!(await u.getUser("U2")).token;
         const hiHandled = await a.handleAccountMessage("U2", "hi", true, io);
-        console.log(JSON.stringify({ listed: log[0].startsWith("Your connections:"), noSignIn: !log.some((l) => l.includes("sign-in link")), disconnectHandled, stillLoggedIn, hiHandled }));
+        const before = log.length;
+        await a.handleAccountMessage("U2", "help", false, io);
+        const help = log[before] ?? "";
+        console.log(JSON.stringify({ help: help.includes("logout") && help.includes("connect <service>"), listed: log[0].startsWith("Your connections:"), noSignIn: !log.some((l) => l.includes("sign-in link")), disconnectHandled, stillLoggedIn, hiHandled }));
       `);
-      expect(JSON.parse(out)).toEqual({ listed: true, noSignIn: true, disconnectHandled: false, stillLoggedIn: true, hiHandled: false });
+      expect(JSON.parse(out)).toEqual({ help: true, listed: true, noSignIn: true, disconnectHandled: false, stillLoggedIn: true, hiHandled: false });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

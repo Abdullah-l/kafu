@@ -94,7 +94,7 @@ export async function handleAccountMessage(
     return true;
   }
 
-  if (isDirectMessage && pendingSecrets.has(userId) && !/^(connect|disconnect|login|logout|whoami|account|model)\b/.test(lower)) {
+  if (isDirectMessage && pendingSecrets.has(userId) && !/^(connect|disconnect|login|logout|whoami|account|model|help)\b/.test(lower)) {
     const { id } = pendingSecrets.get(userId)!;
     const spec = credentialSpecs().find((c) => c.id === id);
     pendingSecrets.delete(userId);
@@ -118,6 +118,19 @@ export async function handleAccountMessage(
     } else {
       await io.dm(`That didn't work (${result.error}). Send \`login\` to get a fresh link.`);
     }
+    return true;
+  }
+
+  if (lower === "help") {
+    const lines = [
+      "Ask me anything: mention me in a channel or DM me.",
+      "",
+      "`login` / `logout`: connect or disconnect your Claude account",
+      "`model` / `model <name>`: show or change your model",
+    ];
+    if (credentialSpecs().length > 0) lines.push("`connect` / `connect <service>` / `disconnect <service>`: your service tokens");
+    lines.push("`whoami`: what's connected", "`help`: this message");
+    await respond(lines.join("\n"));
     return true;
   }
 
