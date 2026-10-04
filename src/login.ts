@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { mkdir, writeFile, chmod } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { Terminal } from "@xterm/headless";
 
 const SHIM_DIR = join(process.cwd(), ".claude", "kafu", "bin");
 const URL_RE = /https:\/\/[^\s\x07\x1b"]*oauth\/authorize\?[^\s\x07\x1b"]+/;
@@ -9,11 +10,14 @@ const OAUTH_ERROR_RE = /OAuth error[^\r\n]*/i;
 const LOGIN_TTL_MS = 15 * 60_000;
 const URL_TIMEOUT_MS = 45_000;
 const TOKEN_TIMEOUT_MS = 60_000;
+const COLS = 1000;
+const ROWS = 60;
 
 type TerminalProc = ReturnType<typeof Bun.spawn> & { terminal?: { write(data: string): void } };
 
 interface PendingLogin {
   proc: TerminalProc;
+  screen: Terminal;
   output: string;
   url: string;
   startedAt: number;
@@ -24,6 +28,13 @@ export interface LoginResult { ok: boolean; token?: string; error?: string }
 
 const pending = new Map<string, PendingLogin>();
 const starting = new Map<string, Promise<string>>();
+
+function screenText(screen: Terminal): string {
+  const buffer = screen.buffer.active;
+  const lines: string[] = [];
+  for (let i = 0; i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
+  return lines.join("\n");
+}
 
 function stripAnsi(text: string): string {
   return text
@@ -75,6 +86,7 @@ export function cancelLogin(key: string): void {
   if (!login) return;
   clearTimeout(login.timer);
   try { login.proc.kill(); } catch {}
+  login.screen.dispose();
   pending.delete(key);
 }
 
@@ -101,6 +113,7 @@ export async function startLogin(key: string, configDir: string, executable = "c
 
     const login: PendingLogin = {
       proc: null as unknown as TerminalProc,
+      screen: new Terminal({ cols: COLS, rows: ROWS, allowProposedApi: true }),
       output: "",
       url: "",
       startedAt: Date.now(),
@@ -110,10 +123,12 @@ export async function startLogin(key: string, configDir: string, executable = "c
     login.proc = Bun.spawn([executable, "setup-token"], {
       env: loginEnv(configDir),
       terminal: {
-        cols: 1000,
-        rows: 60,
+        cols: COLS,
+        rows: ROWS,
         data(_terminal: unknown, chunk: Uint8Array) {
-          login.output += decoder.decode(chunk, { stream: true });
+          const text = decoder.decode(chunk, { stream: true });
+          login.screen.write(text);
+          login.output += text;
           if (login.output.length > 200_000) login.output = login.output.slice(-100_000);
         },
       },
@@ -145,14 +160,15 @@ export async function submitLoginCode(key: string, code: string): Promise<LoginR
     return { ok: false, error: "This Bun version can't drive the sign-in terminal." };
   }
 
-  const mark = login.output.length;
-  login.proc.terminal.write(code.trim() + "\r");
+  login.proc.terminal.write(code.trim());
+  await Bun.sleep(600);
+  login.proc.terminal.write("\r");
 
   const outcome = await waitFor<LoginResult>(() => {
-    const fresh = stripAnsi(login.output.slice(mark));
-    const token = fresh.match(TOKEN_RE)?.[0];
+    const screen = screenText(login.screen);
+    const token = screen.match(TOKEN_RE)?.[0];
     if (token) return { ok: true, token };
-    const error = fresh.match(OAUTH_ERROR_RE)?.[0];
+    const error = screen.match(OAUTH_ERROR_RE)?.[0];
     if (error) return { ok: false, error: error.trim() };
     return null;
   }, TOKEN_TIMEOUT_MS, login.proc);
