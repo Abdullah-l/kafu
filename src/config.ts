@@ -60,7 +60,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
   slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false },
-  multiUser: { enabled: false, mcpConfig: "" },
+  multiUser: { enabled: false, mcpConfig: "", credentials: [] },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
@@ -90,9 +90,18 @@ export interface SlackConfig {
   assistantStatus: boolean;
 }
 
+export interface CredentialSpec {
+  id: string;
+  label: string;
+  env: string;
+  help: string;
+  pattern: string;
+}
+
 export interface MultiUserConfig {
   enabled: boolean;
   mcpConfig: string;
+  credentials: CredentialSpec[];
 }
 
 export type SecurityLevel =
@@ -279,6 +288,7 @@ function parseSettings(raw: Record<string, any>): Settings {
     multiUser: {
       enabled: raw.multiUser?.enabled === true,
       mcpConfig: typeof raw.multiUser?.mcpConfig === "string" ? raw.multiUser.mcpConfig.trim() : "",
+      credentials: parseCredentials(raw.multiUser?.credentials),
     },
     security: {
       level,
@@ -319,6 +329,26 @@ function parseSettings(raw: Record<string, any>): Settings {
     },
     apiToken: typeof raw.apiToken === "string" && raw.apiToken.trim() ? raw.apiToken.trim() : undefined,
   };
+}
+
+function parseCredentials(value: unknown): CredentialSpec[] {
+  if (!Array.isArray(value)) return [];
+  const out: CredentialSpec[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = typeof entry.id === "string" ? entry.id.trim().toLowerCase() : "";
+    const env = typeof entry.env === "string" ? entry.env.trim() : "";
+    if (!/^[a-z0-9_-]{1,32}$/.test(id) || !/^[A-Z_][A-Z0-9_]*$/.test(env)) continue;
+    if (out.some((c) => c.id === id || c.env === env)) continue;
+    out.push({
+      id,
+      env,
+      label: typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : id,
+      help: typeof entry.help === "string" ? entry.help.trim() : "",
+      pattern: typeof entry.pattern === "string" ? entry.pattern : "",
+    });
+  }
+  return out;
 }
 
 function parseTimezone(value: unknown): string {

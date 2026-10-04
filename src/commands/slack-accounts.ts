@@ -1,8 +1,8 @@
 import { CLAUDE_EXECUTABLE } from "../runner";
-import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir } from "../users";
+import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir, setUserSecret, clearUserSecret } from "../users";
 import { startLogin, submitLoginCode, cancelLogin, hasPendingLogin, pendingLoginUrl, looksLikeLoginCode } from "../login";
 import { MODELS, modelLabel } from "../models";
-import { getSettings } from "../config";
+import { getSettings, type CredentialSpec } from "../config";
 
 export interface AccountIO {
   dm(text: string): Promise<void>;
@@ -12,6 +12,24 @@ export interface AccountIO {
 const AUTH_FAILURE_RE = /failed to authenticate|oauth (access )?token (is invalid|has expired)|api error: 401|authentication_(error|failed)|invalid (api key|bearer token|x-api-key)|please run \/login|not logged in|token.*revoked/i;
 
 const loginKey = (userId: string) => `slack:${userId}`;
+const SECRET_TTL_MS = 10 * 60_000;
+const pendingSecrets = new Map<string, { id: string; expires: number }>();
+
+function credentialSpecs(): CredentialSpec[] {
+  return getSettings().multiUser.credentials;
+}
+
+function cleanSecret(text: string): string {
+  return text.trim().replace(/^[`<]+|[`>]+$/g, "").trim();
+}
+
+async function connectionList(userId: string): Promise<string> {
+  const specs = credentialSpecs();
+  if (specs.length === 0) return "There are no services to connect.";
+  const user = await getUser(userId);
+  const lines = specs.map((spec) => `${user?.secrets[spec.id] ? "✅" : "⬜"} ${spec.label} — \`connect ${spec.id}\``);
+  return ["Your connections:", ...lines, "", "Send `connect <name>` to add one or `disconnect <name>` to remove it."].join("\n");
+}
 
 function escapeLinkUrl(url: string): string {
   return url.replace(/&/g, "&amp;");
@@ -67,6 +85,30 @@ export async function handleAccountMessage(
   const arg = rest.join(" ");
   const respond = isDirectMessage ? io.dm : io.reply;
 
+  const pendingSecret = pendingSecrets.get(userId);
+  if (pendingSecret && pendingSecret.expires < Date.now()) pendingSecrets.delete(userId);
+
+  if (isDirectMessage && pendingSecrets.has(userId) && lower === "cancel") {
+    pendingSecrets.delete(userId);
+    await io.dm("Cancelled.");
+    return true;
+  }
+
+  if (isDirectMessage && pendingSecrets.has(userId) && !/^(connect|disconnect|login|logout|whoami|account|model)\b/.test(lower)) {
+    const { id } = pendingSecrets.get(userId)!;
+    const spec = credentialSpecs().find((c) => c.id === id);
+    pendingSecrets.delete(userId);
+    if (!spec) return true;
+    const value = cleanSecret(trimmed);
+    if (!value || /\s/.test(value) || (spec.pattern && !new RegExp(spec.pattern).test(value))) {
+      await io.dm(`That doesn't look like a ${spec.label} credential. Send \`connect ${spec.id}\` to try again.`);
+      return true;
+    }
+    await setUserSecret(userId, spec.id, value);
+    await io.dm(`${spec.label} connected ✅ It's stored encrypted and only used for your requests. You can delete your message with the token now.`);
+    return true;
+  }
+
   if (isDirectMessage && hasPendingLogin(loginKey(userId)) && looksLikeLoginCode(trimmed)) {
     await io.dm("Checking the code…");
     const result = await submitLoginCode(loginKey(userId), trimmed);
@@ -96,9 +138,39 @@ export async function handleAccountMessage(
   if (lower === "whoami" || lower === "account") {
     const user = await getUser(userId);
     const model = user?.model ? modelLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`;
-    await respond(user?.token
-      ? `Connected with your own Claude account. Model: ${model}.`
-      : "Not connected. Send `login` to connect your Claude account.");
+    const claude = user?.token
+      ? `Claude: connected with your own account. Model: ${model}.`
+      : "Claude: not connected. Send `login` to connect your Claude account.";
+    await respond(credentialSpecs().length > 0 ? `${claude}\n\n${await connectionList(userId)}` : claude);
+    return true;
+  }
+
+  if (lower === "connect" || lower === "connections") {
+    await respond(await connectionList(userId));
+    return true;
+  }
+
+  const connectMatch = lower.match(/^(connect|disconnect)\s+([a-z0-9_-]+)$/);
+  if (connectMatch) {
+    const [, action, id] = connectMatch;
+    const spec = credentialSpecs().find((c) => c.id === id);
+    if (!spec) {
+      await respond(`I don't know \`${id}\`.\n\n${await connectionList(userId)}`);
+      return true;
+    }
+    if (action === "disconnect") {
+      const had = await clearUserSecret(userId, spec.id);
+      pendingSecrets.delete(userId);
+      await respond(had ? `${spec.label} disconnected. Also revoke the token on ${spec.label}'s side if you won't use it again.` : `${spec.label} wasn't connected.`);
+      return true;
+    }
+    pendingSecrets.set(userId, { id: spec.id, expires: Date.now() + SECRET_TTL_MS });
+    if (!isDirectMessage) await io.reply(`<@${userId}> I've sent you a DM to connect ${spec.label}.`);
+    await io.dm([
+      `Paste your ${spec.label} credential here in this DM.`,
+      spec.help,
+      "It's stored encrypted and only used for your own requests. Send `cancel` to stop.",
+    ].filter(Boolean).join("\n"));
     return true;
   }
 

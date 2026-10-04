@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { looksLikeLoginCode } from "../login";
 import { isAuthFailure } from "../commands/slack-accounts";
+import { filterMcpConfig, requiredVars } from "../mcp-filter";
 
 const SRC = join(import.meta.dir, "..");
 
@@ -88,6 +89,64 @@ describe("thread sessions", () => {
       const threads = Object.values(data.threads) as Array<{ turnCount: number }>;
       expect(threads.length).toBe(100);
       expect(threads.every((t) => t.turnCount === 1)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("per-user MCP filtering", () => {
+  const shared = {
+    mcpServers: {
+      linear: { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ${LINEAR_API_KEY}" } },
+      elastic: { command: "npx", args: ["-y", "es-mcp"], env: { ES_URL: "https://es", ES_API_KEY: "${ES_API_KEY}" } },
+      docs: { command: "docs-mcp", env: { MODE: "${DOCS_MODE:-ro}" } },
+    },
+  };
+
+  test("finds required variables but ignores ones with defaults", () => {
+    expect(requiredVars(shared.mcpServers.linear)).toEqual(["LINEAR_API_KEY"]);
+    expect(requiredVars(shared.mcpServers.docs)).toEqual([]);
+  });
+
+  test("drops servers whose credentials the person has not connected", () => {
+    const { config, dropped } = filterMcpConfig(shared, new Set(["LINEAR_API_KEY"]));
+    expect(dropped).toEqual(["linear"]);
+    expect(Object.keys(config.mcpServers!)).toEqual(["elastic", "docs"]);
+  });
+
+  test("keeps everything when nothing is missing", () => {
+    expect(filterMcpConfig(shared, new Set()).dropped).toEqual([]);
+  });
+});
+
+describe("credential connect flow", () => {
+  test("stores a credential pasted in DM and lists it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kafu-connect-"));
+    try {
+      await Bun.write(join(dir, ".claude/kafu/settings.json"), JSON.stringify({
+        multiUser: { enabled: true, credentials: [{ id: "linear", label: "Linear", env: "LINEAR_API_KEY", help: "Make a key", pattern: "^lin_api_" }] },
+      }));
+      const out = await runInDir(dir, `
+        process.env.KAFU_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
+        const c = await import(${JSON.stringify(join(SRC, "config.ts"))});
+        await c.loadSettings();
+        const a = await import(${JSON.stringify(join(SRC, "commands/slack-accounts.ts"))});
+        const u = await import(${JSON.stringify(join(SRC, "users.ts"))});
+        const log = [];
+        const io = { dm: async (t) => log.push("dm:" + t), reply: async (t) => log.push("reply:" + t) };
+        await a.handleAccountMessage("U1", "connect linear", false, io);
+        const bad = await a.handleAccountMessage("U1", "not-a-key", true, io);
+        await a.handleAccountMessage("U1", "connect linear", true, io);
+        const good = await a.handleAccountMessage("U1", "lin_api_abc123", true, io);
+        const normal = await a.handleAccountMessage("U1", "what changed in the API today?", true, io);
+        const user = await u.getUser("U1");
+        await a.handleAccountMessage("U1", "disconnect linear", true, io);
+        const after = await u.getUser("U1");
+        console.log(JSON.stringify({ bad, good, normal, stored: user.secrets.linear, after: after.secrets.linear ?? null, rejected: log.some((l) => l.includes("doesn't look like")), channelHint: log[0].startsWith("reply:") }));
+      `);
+      expect(JSON.parse(out)).toEqual({ bad: true, good: true, normal: false, stored: "lin_api_abc123", after: null, rejected: true, channelHint: true });
+      expect(readFileSync(join(dir, ".claude/kafu/users/U1/user.json"), "utf8")).not.toContain("lin_api_abc123");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

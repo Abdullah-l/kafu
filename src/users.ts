@@ -12,6 +12,7 @@ export interface UserRecord {
   id: string;
   token: string | null;
   model: string;
+  secrets: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 }
@@ -20,6 +21,7 @@ interface StoredUser {
   id: string;
   token: string | null;
   model: string;
+  secrets?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 }
@@ -29,6 +31,7 @@ export interface RunIdentity {
   token: string;
   configDir: string;
   model: string;
+  secrets: Record<string, string>;
 }
 
 let keyCache: Buffer | null = null;
@@ -115,7 +118,7 @@ function withUserLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
 async function updateUser(userId: string, patch: (user: StoredUser) => void): Promise<StoredUser> {
   return withUserLock(userId, async () => {
     const now = new Date().toISOString();
-    const user = (await readStored(userId)) ?? { id: userId, token: null, model: "", createdAt: now, updatedAt: now };
+    const user = (await readStored(userId)) ?? { id: userId, token: null, model: "", secrets: {}, createdAt: now, updatedAt: now };
     patch(user);
     user.updatedAt = now;
     await writeStored(user);
@@ -134,7 +137,31 @@ export async function getUser(userId: string): Promise<UserRecord | null> {
       console.error(`[users] Failed to decrypt token for ${userId}: ${err instanceof Error ? err.message : err}`);
     }
   }
-  return { ...stored, token };
+  const secrets: Record<string, string> = {};
+  for (const [id, blob] of Object.entries(stored.secrets ?? {})) {
+    try {
+      secrets[id] = await decrypt(blob);
+    } catch (err) {
+      console.error(`[users] Failed to decrypt ${id} for ${userId}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  return { ...stored, token, secrets };
+}
+
+export async function setUserSecret(userId: string, id: string, value: string): Promise<void> {
+  const encrypted = await encrypt(value);
+  await updateUser(userId, (user) => { user.secrets = { ...(user.secrets ?? {}), [id]: encrypted }; });
+}
+
+export async function clearUserSecret(userId: string, id: string): Promise<boolean> {
+  const stored = await readStored(userId);
+  if (!stored?.secrets?.[id]) return false;
+  await updateUser(userId, (user) => {
+    const next = { ...(user.secrets ?? {}) };
+    delete next[id];
+    user.secrets = next;
+  });
+  return true;
 }
 
 export async function saveUserToken(userId: string, token: string): Promise<void> {
@@ -159,5 +186,5 @@ export async function getRunIdentity(userId: string): Promise<RunIdentity | null
   const configDir = userConfigDir(userId);
   await mkdir(configDir, { recursive: true, mode: 0o700 });
   await chmod(userDir(userId), 0o700).catch(() => {});
-  return { userId, token: user.token, configDir, model: user.model };
+  return { userId, token: user.token, configDir, model: user.model, secrets: user.secrets };
 }

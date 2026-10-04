@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, realpath } from "fs/promises";
+import { mkdir, readFile, writeFile, realpath, rename } from "fs/promises";
 import { join, dirname, resolve, sep } from "path";
 import { execSync } from "child_process";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "fs";
@@ -31,6 +31,7 @@ import { FAST_MODEL } from "./models";
 import { recordResult, abortReason, clearSession, startSession } from "./watchdog";
 import { getPluginManager, type EventContext } from "./plugins";
 import type { RunIdentity } from "./users";
+import { filterMcpConfig, type McpConfigFile } from "./mcp-filter";
 
 const LOGS_DIR = join(process.cwd(), ".claude/kafu/logs");
 const ACTIVE_RUNS_FILE = join(process.cwd(), ".claude/kafu/active-runs");
@@ -90,7 +91,34 @@ function identitySpawnEnv(identity: RunIdentity): Record<string, string> {
   }
   env.CLAUDE_CODE_OAUTH_TOKEN = identity.token;
   env.CLAUDE_CONFIG_DIR = identity.configDir;
+  for (const spec of getSettings().multiUser.credentials) {
+    const value = identity.secrets[spec.id];
+    if (value) env[spec.env] = value;
+    else delete env[spec.env];
+  }
   return env;
+}
+
+async function identityMcpConfig(identity: RunIdentity): Promise<{ path: string | null; missing: string[] }> {
+  const specs = getSettings().multiUser.credentials;
+  const missingSpecs = specs.filter((spec) => !identity.secrets[spec.id]);
+  const sharedPath = sharedMcpConfigPath();
+  if (!sharedPath) return { path: null, missing: missingSpecs.map((s) => s.id) };
+  if (specs.length === 0) return { path: sharedPath, missing: [] };
+
+  let shared: McpConfigFile;
+  try {
+    shared = JSON.parse(await readFile(sharedPath, "utf8")) as McpConfigFile;
+  } catch (err) {
+    console.error(`[${new Date().toLocaleTimeString()}] Failed to read shared MCP config ${sharedPath}:`, err);
+    return { path: null, missing: missingSpecs.map((s) => s.id) };
+  }
+  const { config } = filterMcpConfig(shared, new Set(missingSpecs.map((s) => s.env)));
+  const target = join(dirname(identity.configDir), "mcp.json");
+  const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+  await rename(tmp, target);
+  return { path: target, missing: missingSpecs.map((s) => s.id) };
 }
 
 function sharedMcpConfigPath(): string | null {
@@ -998,9 +1026,11 @@ async function execClaude(
 
   const args = [CLAUDE_EXECUTABLE, "-p", prompt, "--output-format", "stream-json", "--verbose", ...securityArgs];
   const mcpArgs: string[] = [];
+  let missingCredentials: string[] = [];
   if (identity) {
-    const mcpPath = sharedMcpConfigPath();
-    if (mcpPath) mcpArgs.push("--mcp-config", mcpPath);
+    const mcp = await identityMcpConfig(identity);
+    if (mcp.path) mcpArgs.push("--mcp-config", mcp.path);
+    missingCredentials = mcp.missing;
   }
   args.push(...mcpArgs);
 
@@ -1024,6 +1054,15 @@ async function execClaude(
   if (pm) {
     const pluginResult = await pm.emit("before_prompt_build", { prompt }, ctx);
     if (pluginResult?.appendSystemContext) appendParts.push(pluginResult.appendSystemContext);
+  }
+
+  if (missingCredentials.length > 0) {
+    const labels = settings.multiUser.credentials
+      .filter((spec) => missingCredentials.includes(spec.id))
+      .map((spec) => `${spec.label} (\`connect ${spec.id}\`)`);
+    appendParts.push(
+      `This person has not connected these services yet, so their tools are unavailable: ${labels.join(", ")}. If they ask for something that needs one, tell them to DM you the matching \`connect\` command to add their own credentials. Do not use anyone else's credentials.`
+    );
   }
 
   if (security.level !== "unrestricted") appendParts.push(DIR_SCOPE_PROMPT);
