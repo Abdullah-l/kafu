@@ -96,6 +96,8 @@ export interface CredentialSpec {
   env: string;
   help: string;
   pattern: string;
+  method: "paste" | "github";
+  scopes: string[];
 }
 
 export interface MultiUserConfig {
@@ -346,6 +348,8 @@ function parseCredentials(value: unknown): CredentialSpec[] {
       label: typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : id,
       help: typeof entry.help === "string" ? entry.help.trim() : "",
       pattern: typeof entry.pattern === "string" ? entry.pattern : "",
+      method: entry.method === "github" ? "github" : "paste",
+      scopes: Array.isArray(entry.scopes) ? entry.scopes.filter((s: unknown) => typeof s === "string" && /^[a-z:_]+$/.test(s)) : [],
     });
   }
   return out;

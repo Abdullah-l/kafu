@@ -1,5 +1,6 @@
 import { CLAUDE_EXECUTABLE } from "../runner";
-import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir, setUserSecret, clearUserSecret } from "../users";
+import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir, userScratchDir, setUserSecret, clearUserSecret } from "../users";
+import { startGhDeviceLogin, cancelGhLogin } from "../gh-login";
 import { startLogin, submitLoginCode, cancelLogin, hasPendingLogin, pendingLoginUrl, looksLikeLoginCode } from "../login";
 import { MODELS, modelLabel } from "../models";
 import { getSettings, type CredentialSpec } from "../config";
@@ -7,7 +8,10 @@ import { getSettings, type CredentialSpec } from "../config";
 export interface AccountIO {
   dm(text: string): Promise<void>;
   reply(text: string): Promise<void>;
+  dmBlocks?(text: string, blocks: unknown[]): Promise<void>;
 }
+
+export const CONNECT_ACTION_PREFIX = "kafu_connect:";
 
 const AUTH_FAILURE_RE = /failed to authenticate|oauth (access )?token (is invalid|has expired)|api error: 401|authentication_(error|failed)|invalid (api key|bearer token|x-api-key)|please run \/login|not logged in|token.*revoked/i;
 
@@ -21,6 +25,63 @@ function credentialSpecs(): CredentialSpec[] {
 
 function cleanSecret(text: string): string {
   return text.trim().replace(/^[`<]+|[`>]+$/g, "").trim();
+}
+
+async function connectButtons(userId: string): Promise<unknown[] | null> {
+  const user = await getUser(userId);
+  const missing = credentialSpecs().filter((spec) => !user?.secrets[spec.id]);
+  if (missing.length === 0) return null;
+  return [{
+    type: "actions",
+    elements: missing.slice(0, 25).map((spec) => ({
+      type: "button",
+      text: { type: "plain_text", text: `Connect ${spec.label}` },
+      action_id: `${CONNECT_ACTION_PREFIX}${spec.id}`,
+      value: spec.id,
+    })),
+  }];
+}
+
+async function sendConnections(userId: string, io: AccountIO, respond: (text: string) => Promise<void>, viaDm: boolean): Promise<void> {
+  const text = await connectionList(userId);
+  const buttons = viaDm && io.dmBlocks ? await connectButtons(userId) : null;
+  if (buttons && io.dmBlocks) {
+    await io.dmBlocks(text, [{ type: "section", text: { type: "mrkdwn", text } }, ...buttons]);
+  } else {
+    await respond(text);
+  }
+}
+
+async function githubLogin(userId: string, displayName: string, spec: CredentialSpec, io: AccountIO): Promise<void> {
+  const key = `gh:${userId}`;
+  let login;
+  try {
+    login = await startGhDeviceLogin(key, userScratchDir(userId, "gh-login"), spec.scopes);
+  } catch (err) {
+    await io.dm(`I couldn't start the GitHub sign-in: ${err instanceof Error ? err.message : err}. You can paste a token here instead.`);
+    return;
+  }
+  await io.dm([
+    `Open <${login.url}|github.com/login/device> and enter this code: \`${login.code}\``,
+    `Approve it and you're done. I'll confirm here. (Or paste a ${displayName} token instead.)`,
+  ].join("\n"));
+  void login.result.then(async (res) => {
+    if (res.error === "cancelled") return;
+    if (!res.token) {
+      await io.dm(`GitHub sign-in didn't finish (${res.error}). Send \`connect ${spec.id}\` to try again.`);
+      return;
+    }
+    pendingSecrets.delete(userId);
+    await setUserSecret(userId, spec.id, res.token);
+    let who = "";
+    try {
+      const me = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${res.token}`, "User-Agent": "kafu" } });
+      if (me.ok) who = ` as @${((await me.json()) as { login?: string }).login ?? ""}`;
+    } catch {}
+    await io.dm(`${spec.label} connected${who} ✅`);
+  }).catch((err) => {
+    console.error(`[Slack] GitHub device login failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+  });
 }
 
 async function connectionList(userId: string): Promise<string> {
@@ -105,6 +166,7 @@ export async function handleAccountMessage(
       return true;
     }
     await setUserSecret(userId, spec.id, value);
+    if (spec.method === "github") cancelGhLogin(`gh:${userId}`);
     await io.dm(`${spec.label} connected ✅ It's stored encrypted and only used for your requests. You can delete your message with the token now.`);
     return true;
   }
@@ -115,6 +177,7 @@ export async function handleAccountMessage(
     if (result.ok && result.token) {
       await saveUserToken(userId, result.token);
       await io.dm("Connected ✅ Mention me in any channel I'm in, or DM me.");
+      if (credentialSpecs().length > 0) await sendConnections(userId, io, io.dm, true);
     } else {
       await io.dm(`That didn't work (${result.error}). Send \`login\` to get a fresh link.`);
     }
@@ -159,7 +222,8 @@ export async function handleAccountMessage(
   }
 
   if (lower === "connect" || lower === "connections") {
-    await respond(await connectionList(userId));
+    if (!isDirectMessage) await io.reply(`<@${userId}> I've sent your connections in a DM.`);
+    await sendConnections(userId, io, io.dm, true);
     return true;
   }
 
@@ -174,11 +238,16 @@ export async function handleAccountMessage(
     if (action === "disconnect") {
       const had = await clearUserSecret(userId, spec.id);
       pendingSecrets.delete(userId);
+      if (spec.method === "github") cancelGhLogin(`gh:${userId}`);
       await respond(had ? `${spec.label} disconnected. Also revoke the token on ${spec.label}'s side if you won't use it again.` : `${spec.label} wasn't connected.`);
       return true;
     }
     pendingSecrets.set(userId, { id: spec.id, expires: Date.now() + SECRET_TTL_MS });
     if (!isDirectMessage) await io.reply(`<@${userId}> I've sent you a DM to connect ${spec.label}.`);
+    if (spec.method === "github") {
+      await githubLogin(userId, spec.label, spec, io);
+      return true;
+    }
     await io.dm([
       `Paste your ${spec.label} credential here in this DM.`,
       spec.help,

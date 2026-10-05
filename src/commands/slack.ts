@@ -7,7 +7,7 @@ import { transcribeAudioToText } from "../whisper";
 import { resolveSkillPrompt } from "../skills";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { getRunIdentity, type RunIdentity } from "../users";
-import { handleAccountMessage, sendLoginLink, isAuthFailure, type AccountIO } from "./slack-accounts";
+import { handleAccountMessage, sendLoginLink, isAuthFailure, CONNECT_ACTION_PREFIX, type AccountIO } from "./slack-accounts";
 import { mkdir, realpath } from "node:fs/promises";
 import { extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
@@ -887,6 +887,10 @@ function accountIO(token: string, userId: string, channelId: string, threadTs: s
   return {
     dm: (text) => sendMessageToUser(token, userId, text),
     reply: (text) => sendMessage(token, channelId, text, threadTs),
+    dmBlocks: async (text, blocks) => {
+      const data = await slackApi<{ channel: { id: string } }>(token, "conversations.open", { users: userId });
+      await slackApi(token, "chat.postMessage", { channel: data.channel.id, text, blocks });
+    },
   };
 }
 
@@ -1412,6 +1416,12 @@ async function handleBlockAction(payload: any): Promise<void> {
 
   const action = actions[0];
   const actionId = action.action_id;
+
+  if (actionId.startsWith(CONNECT_ACTION_PREFIX) && isMultiUser()) {
+    const id = actionId.slice(CONNECT_ACTION_PREFIX.length);
+    await handleAccountMessage(user.id, `connect ${id}`, true, accountIO(config.botToken, user.id, channelId, message?.thread_ts ?? message?.ts ?? ""));
+    return;
+  }
 
   if (actionId === STOP_ACTION_ID) {
     const key = action.value ?? "";

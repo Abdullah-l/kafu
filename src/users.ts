@@ -91,6 +91,10 @@ export function userConfigDir(userId: string): string {
   return join(userDir(userId), "claude");
 }
 
+export function userScratchDir(userId: string, name: string): string {
+  return join(userDir(userId), name);
+}
+
 async function readStored(userId: string): Promise<StoredUser | null> {
   try {
     return JSON.parse(await readFile(userFile(userId), "utf8")) as StoredUser;
