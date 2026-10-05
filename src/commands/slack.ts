@@ -117,6 +117,8 @@ function botMessageKey(channelId: string, threadTs?: string): string {
 }
 
 const threadHistoryLoaded = new Map<string, number>();
+const seenThreadImages = new Map<string, { at: number; ids: Set<string> }>();
+const EARLIER_IMAGE_LIMIT = 3;
 const THREAD_STATE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function isDuplicate(channelId: string, ts: string): boolean {
@@ -147,6 +149,9 @@ setInterval(() => {
   }
   for (const [k, t] of threadHistoryLoaded) {
     if (now - t > THREAD_STATE_TTL_MS) threadHistoryLoaded.delete(k);
+  }
+  for (const [k, v] of seenThreadImages) {
+    if (now - v.at > THREAD_STATE_TTL_MS) seenThreadImages.delete(k);
   }
 }, 60_000).unref();
 
@@ -607,7 +612,7 @@ async function fetchThreadHistory(
   channelId: string,
   threadTs: string,
   limit: number = 20,
-): Promise<{ role: string; text: string; user?: string; ts: string }[]> {
+): Promise<{ role: string; text: string; user?: string; ts: string; files?: SlackFile[] }[]> {
   const params = new URLSearchParams({
     channel: channelId,
     ts: threadTs,
@@ -626,6 +631,7 @@ async function fetchThreadHistory(
       user?: string;
       bot_id?: string;
       ts: string;
+      files?: SlackFile[];
     }>;
   };
   if (!data.ok) {
@@ -637,6 +643,7 @@ async function fetchThreadHistory(
     text: msg.text,
     user: msg.user,
     ts: msg.ts,
+    files: msg.files,
   }));
 }
 
@@ -1009,6 +1016,33 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       threadHistoryLoaded.set(sessionThreadId, Date.now());
     }
 
+    const earlierImages: { path: string; user?: string }[] = [];
+    if (inThread && sessionThreadId) {
+      const seen = seenThreadImages.get(sessionThreadId) ?? { at: Date.now(), ids: new Set<string>() };
+      for (const f of imageFiles) seen.ids.add(f.id);
+      try {
+        const history = await fetchThreadHistory(config.botToken, channelId, event.thread_ts!, 200);
+        const candidates = history
+          .filter((m) => m.ts !== event.ts && Number(m.ts) <= Number(event.ts))
+          .flatMap((m) => (m.files ?? []).filter(isImageFile).map((file) => ({ file, user: m.user })))
+          .filter((c) => !seen.ids.has(c.file.id))
+          .slice(-EARLIER_IMAGE_LIMIT);
+        for (const c of candidates) {
+          seen.ids.add(c.file.id);
+          try {
+            const path = await downloadSlackFile(config.botToken, c.file, "image");
+            if (path) earlierImages.push({ path, user: c.user });
+          } catch (err) {
+            console.error(`[Slack] Failed to download earlier thread image: ${err instanceof Error ? err.message : err}`);
+          }
+        }
+      } catch (err) {
+        debugLog(`Failed to scan thread for images: ${err instanceof Error ? err.message : err}`);
+      }
+      seen.at = Date.now();
+      seenThreadImages.set(sessionThreadId, seen);
+    }
+
     let imagePath: string | null = null;
     let voicePath: string | null = null;
     let voiceTranscript: string | null = null;
@@ -1094,6 +1128,12 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       promptParts.push("The user attached an image. Inspect this image file directly before answering.");
     } else if (hasImage) {
       promptParts.push("The user attached an image, but downloading it failed. Respond and ask them to resend.");
+    }
+    if (earlierImages.length > 0) {
+      for (const img of earlierImages) {
+        promptParts.push(`Earlier image in this thread${img.user ? ` from <@${img.user}>` : ""}: ${img.path}`);
+      }
+      promptParts.push("These images were posted earlier in the thread. Inspect them if the message refers to them.");
     }
     if (voiceTranscript) {
       promptParts.push(`Voice transcript: ${voiceTranscript}`);
