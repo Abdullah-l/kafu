@@ -184,3 +184,36 @@ describe("account command routing", () => {
     }
   });
 });
+
+describe("connections portal", () => {
+  test("links are single-use, sessions gate the API, and pages never leak across users", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kafu-portal-"));
+    try {
+      await Bun.write(join(dir, ".claude/kafu/settings.json"), JSON.stringify({
+        multiUser: { enabled: true, portal: { enabled: true, host: "127.0.0.1", port: 46511, publicUrl: "http://127.0.0.1:46511" }, credentials: [{ id: "linear", label: "Linear", env: "LINEAR_API_KEY", help: "", pattern: "^lin_api_" }] },
+      }));
+      const out = await runInDir(dir, `
+        process.env.KAFU_SECRET_KEY = Buffer.alloc(32, 5).toString("base64");
+        const c = await import(${JSON.stringify(join(SRC, "config.ts"))});
+        await c.loadSettings();
+        const p = await import(${JSON.stringify(join(SRC, "portal/server.ts"))});
+        p.startPortal();
+        const link = await p.portalLink("UA");
+        const first = await fetch(link, { redirect: "manual" });
+        const cookie = (first.headers.get("set-cookie") || "").split(";")[0];
+        const reuse = await fetch(link, { redirect: "manual" });
+        const tampered = await fetch(link.slice(0, -3) + "abc", { redirect: "manual" });
+        const status = await (await fetch("http://127.0.0.1:46511/api/status", { headers: { cookie } })).json();
+        const noHeader = await fetch("http://127.0.0.1:46511/api/services/linear/secret", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ value: "lin_api_x" }) });
+        const saved = await (await fetch("http://127.0.0.1:46511/api/services/linear/secret", { method: "POST", headers: { cookie, "x-kafu": "1", "content-type": "application/json" }, body: JSON.stringify({ value: "lin_api_abc" }) })).json();
+        const after = await (await fetch("http://127.0.0.1:46511/api/status", { headers: { cookie } })).json();
+        const anon = await fetch("http://127.0.0.1:46511/api/status");
+        p.stopPortal();
+        console.log(JSON.stringify({ first: first.status, hasCookie: cookie.startsWith("kafu_portal="), reuse: reuse.status, tampered: tampered.status, user: status.userId, noHeader: noHeader.status, saved: saved.ok, linear: after.services[0].connected, anon: anon.status }));
+      `);
+      expect(JSON.parse(out)).toEqual({ first: 302, hasCookie: true, reuse: 401, tampered: 401, user: "UA", noHeader: 403, saved: true, linear: true, anon: 401 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -10,6 +10,7 @@ import { startWebUi, type WebServerHandle } from "../web";
 import { getOrCreateWebToken } from "../ui/auth";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { PluginManager, setPluginManager } from "../plugins";
+import { startPortal, stopPortal } from "../portal/server";
 
 const CLAUDE_DIR = join(process.cwd(), ".claude");
 const STATUSLINE_FILE = join(CLAUDE_DIR, "statusline.cjs");
@@ -268,6 +269,7 @@ export async function start(args: string[] = []) {
     await pluginManager.stopServices();
     setPluginManager(null);
     if (slackStopFn) slackStopFn();
+    stopPortal();
     if (web) web.stop();
     await teardownStatusline();
     await cleanupPidFile();
@@ -347,6 +349,15 @@ export async function start(args: string[] = []) {
 
   await initSlack(currentSettings.slack.botToken, currentSettings.slack.appToken);
   if (!slackBotToken) console.log("  Slack: not configured");
+
+  if (currentSettings.multiUser.enabled && currentSettings.multiUser.portal.enabled) {
+    try {
+      const portal = startPortal();
+      console.log(`[${ts()}] Connections portal: ${portal.url} (listening on ${currentSettings.multiUser.portal.host}:${currentSettings.multiUser.portal.port})`);
+    } catch (err) {
+      console.error(`[${ts()}] Failed to start connections portal:`, err);
+    }
+  }
 
   if (pluginManager.hasPlugins) {
     pluginManager.setChannelSenders({

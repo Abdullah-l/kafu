@@ -60,7 +60,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
   slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false },
-  multiUser: { enabled: false, mcpConfig: "", credentials: [] },
+  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
@@ -100,10 +100,20 @@ export interface CredentialSpec {
   scopes: string[];
 }
 
+export interface PortalConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  publicUrl: string;
+  title: string;
+}
+
 export interface MultiUserConfig {
   enabled: boolean;
   mcpConfig: string;
   credentials: CredentialSpec[];
+  directMessages: boolean;
+  portal: PortalConfig;
 }
 
 export type SecurityLevel =
@@ -291,6 +301,14 @@ function parseSettings(raw: Record<string, any>): Settings {
       enabled: raw.multiUser?.enabled === true,
       mcpConfig: typeof raw.multiUser?.mcpConfig === "string" ? raw.multiUser.mcpConfig.trim() : "",
       credentials: parseCredentials(raw.multiUser?.credentials),
+      directMessages: raw.multiUser?.directMessages !== false,
+      portal: {
+        enabled: raw.multiUser?.portal?.enabled === true,
+        host: typeof raw.multiUser?.portal?.host === "string" && raw.multiUser.portal.host.trim() ? raw.multiUser.portal.host.trim() : "0.0.0.0",
+        port: Number.isFinite(raw.multiUser?.portal?.port) ? Number(raw.multiUser.portal.port) : 4650,
+        publicUrl: typeof raw.multiUser?.portal?.publicUrl === "string" ? raw.multiUser.portal.publicUrl.trim().replace(/\/+$/, "") : "",
+        title: typeof raw.multiUser?.portal?.title === "string" && raw.multiUser.portal.title.trim() ? raw.multiUser.portal.title.trim() : "Connections",
+      },
     },
     security: {
       level,

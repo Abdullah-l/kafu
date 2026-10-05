@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile, chmod } from "node:fs/promises";
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 
 const KAFU_DIR = join(process.cwd(), ".claude", "kafu");
 const USERS_DIR = join(KAFU_DIR, "users");
@@ -61,6 +61,10 @@ async function getKey(): Promise<Buffer> {
   });
   keyCache = Buffer.from((await readFile(KEY_FILE, "utf8")).trim(), "base64");
   return keyCache;
+}
+
+export async function deriveKey(purpose: string): Promise<Buffer> {
+  return createHmac("sha256", await getKey()).update(`kafu:${purpose}`).digest();
 }
 
 async function encrypt(plain: string): Promise<string> {

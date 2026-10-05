@@ -4,11 +4,60 @@ import { startGhDeviceLogin, cancelGhLogin } from "../gh-login";
 import { startLogin, submitLoginCode, cancelLogin, hasPendingLogin, pendingLoginUrl, looksLikeLoginCode } from "../login";
 import { MODELS, modelLabel } from "../models";
 import { getSettings, type CredentialSpec } from "../config";
+import { changeModel } from "../accounts";
+import { portalLink } from "../portal/server";
 
 export interface AccountIO {
   dm(text: string): Promise<void>;
   reply(text: string): Promise<void>;
   dmBlocks?(text: string, blocks: unknown[]): Promise<void>;
+  ephemeral?(text: string, blocks?: unknown[]): Promise<void>;
+}
+
+export function portalEnabled(): boolean {
+  const { multiUser } = getSettings();
+  return multiUser.enabled && multiUser.portal.enabled;
+}
+
+export async function sendPortalLink(userId: string, io: AccountIO, intro: string): Promise<void> {
+  const url = await portalLink(userId);
+  const text = `${intro} <${url}|Open your connections> (private link, expires in 15 minutes)`;
+  const blocks = [
+    { type: "section", text: { type: "mrkdwn", text: intro } },
+    { type: "actions", elements: [{ type: "button", style: "primary", text: { type: "plain_text", text: "Open your connections" }, url }] },
+    { type: "context", elements: [{ type: "mrkdwn", text: "Only you can see this. The link is private and expires in 15 minutes." }] },
+  ];
+  if (io.ephemeral) await io.ephemeral(text, blocks);
+  else await io.dm(text);
+}
+
+async function handlePortalMode(userId: string, lower: string, respond: (text: string) => Promise<void>, io: AccountIO): Promise<boolean> {
+  if (lower === "help") {
+    await respond([
+      "Ask me anything: mention me where you're working.",
+      "",
+      "`connect`: open your connections page (Claude, GitHub and other services)",
+      "`model` / `model <name>`: show or change your model",
+      "`help`: this message",
+    ].join("\n"));
+    return true;
+  }
+  if (/^(login|logout|connect|connections|disconnect|whoami|account|settings)(\s+[a-z0-9_-]+)?$/.test(lower)) {
+    await sendPortalLink(userId, io, "Manage your connections here:");
+    return true;
+  }
+  const model = lower.match(/^model(?:\s+(\S+))?$/);
+  if (model) {
+    if (!model[1]) {
+      const user = await getUser(userId);
+      await respond(`Your model: ${user?.model ? modelLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`}\n\nChange it with \`model <name>\`:\n${modelList()}\n• \`default\` — use the bot default`);
+      return true;
+    }
+    const result = await changeModel(userId, model[1]);
+    await respond(result.ok ? (model[1] === "default" ? "Back to the default model." : `Switched to ${modelLabel(resolveModel(model[1])!)}.`) : `I don't know that model. Pick one of:\n${modelList()}`);
+    return true;
+  }
+  return false;
 }
 
 export const CONNECT_ACTION_PREFIX = "kafu_connect:";
@@ -117,6 +166,10 @@ function modelList(): string {
 }
 
 export async function sendLoginLink(userId: string, io: AccountIO, fromChannel: boolean, fresh = false): Promise<void> {
+  if (portalEnabled()) {
+    await sendPortalLink(userId, io, "Connect your Claude account first, then come back and ask again:");
+    return;
+  }
   if (fromChannel) await io.reply(`<@${userId}> connect your Claude account first. I've sent you a DM.`);
   let url: string;
   try {
@@ -145,6 +198,8 @@ export async function handleAccountMessage(
   const [word, ...rest] = lower.split(/\s+/);
   const arg = rest.join(" ");
   const respond = isDirectMessage ? io.dm : io.reply;
+
+  if (portalEnabled()) return handlePortalMode(userId, lower, respond, io);
 
   const pendingSecret = pendingSecrets.get(userId);
   if (pendingSecret && pendingSecret.expires < Date.now()) pendingSecrets.delete(userId);

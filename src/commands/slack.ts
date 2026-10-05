@@ -7,7 +7,7 @@ import { transcribeAudioToText } from "../whisper";
 import { resolveSkillPrompt } from "../skills";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { getRunIdentity, type RunIdentity } from "../users";
-import { handleAccountMessage, sendLoginLink, isAuthFailure, CONNECT_ACTION_PREFIX, type AccountIO } from "./slack-accounts";
+import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, CONNECT_ACTION_PREFIX, type AccountIO } from "./slack-accounts";
 import { mkdir, realpath } from "node:fs/promises";
 import { extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
@@ -891,6 +891,15 @@ function accountIO(token: string, userId: string, channelId: string, threadTs: s
       const data = await slackApi<{ channel: { id: string } }>(token, "conversations.open", { users: userId });
       await slackApi(token, "chat.postMessage", { channel: data.channel.id, text, blocks });
     },
+    ephemeral: async (text, blocks) => {
+      await slackApi(token, "chat.postEphemeral", {
+        channel: channelId,
+        user: userId,
+        text,
+        ...(blocks ? { blocks } : {}),
+        ...(threadTs ? { thread_ts: threadTs } : {}),
+      });
+    },
   };
 }
 
@@ -959,6 +968,12 @@ async function handleMessage(event: SlackMessage): Promise<void> {
   let identity: RunIdentity | undefined;
   if (isMultiUser() && userId) {
     const io = accountIO(config.botToken, userId, channelId, event.thread_ts ?? event.ts);
+    if (isDirectMessage && !getSettings().multiUser.directMessages) {
+      await sendPortalLink(userId, io, "I don't take DMs. Mention me in a channel where you're working. Your connections are here:").catch((err) => {
+        console.error(`[Slack] Failed to answer DM from ${userId}: ${err instanceof Error ? err.message : err}`);
+      });
+      return;
+    }
     try {
       if (await handleAccountMessage(userId, cleanText, isDirectMessage, io)) return;
       identity = (await getRunIdentity(userId)) ?? undefined;

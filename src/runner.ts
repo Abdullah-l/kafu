@@ -1059,9 +1059,9 @@ async function execClaude(
   if (missingCredentials.length > 0) {
     const labels = settings.multiUser.credentials
       .filter((spec) => missingCredentials.includes(spec.id))
-      .map((spec) => `${spec.label} (\`connect ${spec.id}\`)`);
+      .map((spec) => spec.label);
     appendParts.push(
-      `This person has not connected these services yet, so their tools are unavailable: ${labels.join(", ")}. If they ask for something that needs one, tell them to DM you the matching \`connect\` command to add their own credentials. Do not use anyone else's credentials.`
+      `This person has not connected these services yet, so their tools are unavailable: ${labels.join(", ")}. If they ask for something that needs one, tell them to connect it themselves: mentioning you with \`connect\` gives them their private connections link. Do not use anyone else's credentials.`
     );
   }
 
