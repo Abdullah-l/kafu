@@ -217,3 +217,47 @@ describe("connections portal", () => {
     }
   });
 });
+
+describe("local agent pairing", () => {
+  test("pair codes work once, agents need a valid device token, and unpairing disconnects them", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kafu-agent-"));
+    try {
+      await Bun.write(join(dir, ".claude/kafu/settings.json"), JSON.stringify({
+        multiUser: { enabled: true, portal: { enabled: true, host: "127.0.0.1", port: 46521, publicUrl: "http://127.0.0.1:46521" } },
+      }));
+      const out = await runInDir(dir, `
+        process.env.KAFU_SECRET_KEY = Buffer.alloc(32, 6).toString("base64");
+        const c = await import(${JSON.stringify(join(SRC, "config.ts"))});
+        await c.loadSettings();
+        const p = await import(${JSON.stringify(join(SRC, "portal/server.ts"))});
+        const a = await import(${JSON.stringify(join(SRC, "portal/auth.ts"))});
+        const relay = await import(${JSON.stringify(join(SRC, "agent/relay.ts"))});
+        const u = await import(${JSON.stringify(join(SRC, "users.ts"))});
+        p.startPortal();
+        const code = await a.createPairCode("UB");
+        const pair = (c) => fetch("http://127.0.0.1:46521/agent/pair", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: c, name: "laptop" }) }).then((r) => r.json());
+        const first = await pair(code);
+        const again = await pair(code);
+        const open = (token) => new Promise((resolve) => {
+          const ws = new WebSocket("ws://127.0.0.1:46521/agent", { headers: { Authorization: "Bearer " + token } });
+          ws.onmessage = () => resolve({ ws, ok: true });
+          ws.onerror = () => resolve({ ok: false });
+          ws.onclose = () => resolve({ ok: false });
+        });
+        const bad = await open("nope");
+        const good = await open(first.token);
+        const online = relay.onlineAgent("UB")?.name ?? null;
+        const offline = await relay.runOnAgent("UNOBODY", { prompt: "x", sessionKey: "k", model: "", system: "", timeoutMs: 1000, attachments: [] });
+        const closed = new Promise((resolve) => { good.ws.onclose = (e) => resolve(e.code); });
+        await u.removeUserDevices("UB"); relay.disconnectAgents("UB");
+        const closeCode = await closed;
+        const reconnect = await open(first.token);
+        p.stopPortal();
+        console.log(JSON.stringify({ paired: first.ok && first.userId === "UB", reuse: again.ok, bad: bad.ok, good: good.ok, online, offline: offline.exitCode, closeCode, reconnect: reconnect.ok }));
+      `);
+      expect(JSON.parse(out.trim().split("\n").pop()!)).toEqual({ paired: true, reuse: false, bad: false, good: true, online: "laptop", offline: 1, closeCode: 4001, reconnect: false });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

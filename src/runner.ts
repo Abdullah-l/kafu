@@ -38,7 +38,7 @@ const ACTIVE_RUNS_FILE = join(process.cwd(), ".claude/kafu/active-runs");
 const PERMISSION_MODE_FILE = join(process.cwd(), ".claude/kafu/permission-mode.json");
 const PROMPTS_DIR = join(import.meta.dir, "..", "prompts");
 const PROJECT_PROMPTS_DIR = join(process.cwd(), ".claude", "kafu", "prompts");
-const PROJECT_CLAUDE_MD = join(process.cwd(), "CLAUDE.md");
+export const PROJECT_CLAUDE_MD = join(process.cwd(), "CLAUDE.md");
 const LEGACY_PROJECT_CLAUDE_MD = join(process.cwd(), ".claude", "CLAUDE.md");
 const KAFU_BLOCK_START = "<!-- kafu:managed:start -->";
 const KAFU_BLOCK_END = "<!-- kafu:managed:end -->";
@@ -302,7 +302,24 @@ function unregisterCancelProc(cancelKey: string, proc: ReturnType<typeof Bun.spa
   if (set.size === 0) procsByCancelKey.delete(cancelKey);
 }
 
+const remoteCancels = new Map<string, () => void>();
+
+export function registerRemoteCancel(cancelKey: string, cancel: () => void): void {
+  remoteCancels.set(cancelKey, cancel);
+}
+
+export function unregisterRemoteCancel(cancelKey: string): void {
+  remoteCancels.delete(cancelKey);
+}
+
 export function killRun(cancelKey: string): boolean {
+  const remote = remoteCancels.get(cancelKey);
+  if (remote) {
+    userStoppedKeys.add(cancelKey);
+    remoteCancels.delete(cancelKey);
+    remote();
+    return true;
+  }
   const set = procsByCancelKey.get(cancelKey);
   if (!set || set.size === 0) return false;
   userStoppedKeys.add(cancelKey);
@@ -457,7 +474,7 @@ async function runClaudeOnce(
   }
 }
 
-async function runClaudeStream(
+export async function runClaudeStream(
   baseArgs: string[],
   model: string,
   api: string,
@@ -561,6 +578,7 @@ async function runClaudeStream(
     await Promise.race([
       Promise.all([readStdout(), readStderr()]),
       timeoutPromise,
+      proc.exited.then(() => Bun.sleep(2000)),
     ]);
     if (streamJsonTimeoutId) clearTimeout(streamJsonTimeoutId);
     await proc.exited;
@@ -1556,7 +1574,7 @@ export async function streamUserMessage(
   return enqueue(() => streamClaude(name, prefixUserMessageWithClock(prompt), onChunk, onUnblock, onAgentEvent));
 }
 
-function prefixUserMessageWithClock(prompt: string): string {
+export function prefixUserMessageWithClock(prompt: string): string {
   try {
     const settings = getSettings();
     const prefix = buildClockPromptPrefix(new Date(), settings.timezoneOffsetMinutes);

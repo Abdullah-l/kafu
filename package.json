@@ -17,5 +17,8 @@
   "dependencies": {
     "@xterm/headless": "^6.0.0",
     "ogg-opus-decoder": "^1.7.3"
+  },
+  "bin": {
+    "kafu": "src/index.ts"
   }
 }

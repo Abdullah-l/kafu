@@ -88,6 +88,23 @@ Off by default. Turn it on to share one Slack bot across a team, with every requ
 - The encryption key is generated at `.claude/kafu/secret.key`, or set `KAFU_SECRET_KEY` (32 bytes, base64) to keep it out of the project folder.
 - In the Slack app, enable the **Messages** tab under App Home so people can DM the bot.
 
+## Local agent
+
+In multi-user mode, people can run their requests on their own computer instead of the server. The server keeps Slack and routing; the work runs in the official `claude` on the person's machine, with their own Claude login, MCP servers, repos and git.
+
+```bash
+git clone <kafu repo> ~/kafu && cd ~/kafu && bun install && bun link
+kafu agent pair <server-url> <code>   # mention the bot with `pair` in Slack to get this command
+kafu agent                            # keep it running
+kafu agent status                     # pairing, Claude, gh and MCP status
+```
+
+- The agent connects out to the server (`/agent` WebSocket on the portal port); nothing listens on the laptop.
+- Pairing codes work once and expire in 10 minutes. The device token is stored in `~/.kafu/agent.json` (`KAFU_AGENT_HOME` overrides the folder). `unpair` in Slack revokes it.
+- `~/.kafu/agent.json` also sets `workspace` (where Claude runs, default your home folder), `permissionMode` (default `bypassPermissions`; use `acceptEdits` plus `allowedTools` to restrict) and `allowedTools`.
+- Paired people whose computer is offline get told so; there's no server fallback. Unpaired people keep running on the server.
+- Slack attachments are sent to the computer with the request; the Stop button and live progress work the same.
+
 ## CLI
 
 ```bash
