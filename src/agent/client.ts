@@ -249,6 +249,13 @@ export async function runAgent(): Promise<void> {
     ws.onerror = () => {};
   };
 
+  const shutdown = () => {
+    for (const id of running) killRun(id);
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
   console.log(`kafu agent "${config.name}" → ${config.server} (workspace ${config.workspace})`);
   connect();
   await new Promise(() => {});
