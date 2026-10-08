@@ -5,7 +5,7 @@ Kafu (كفو, "dependable") runs Claude Code as a daemon you talk to from Slack,
 ## Features
 
 - **Slack** over Socket Mode: DMs, @mentions, per-thread sessions, live progress message with a Stop button, file uploads, reactions
-- **Multi-user Slack** (opt-in): one bot for a whole team, each person signs in with their own Claude subscription
+- **Teams** (opt-in): one Slack bot for a whole team; each person's requests run on their own computer through a small agent, or on the server with their own credentials
 - **Telegram**: DMs and groups, voice transcription (whisper.cpp), images, per-chat model switching
 - **Web UI**: chat, session history, usage, runtime info
 - **Models**: Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 4.5, or any Claude model ID; optional fallback model and keyword-based routing
@@ -28,11 +28,11 @@ As a Claude Code plugin:
 /kafu:start
 ```
 
-Or from a clone, inside the project folder the bot should work in:
+Or install the CLI and run it inside the project folder the bot should work in:
 
 ```bash
-bun install
-bun run /path/to/kafu/src/index.ts start --web
+bun install -g github:Abdullah-l/kafu
+kafu start --web
 ```
 
 The first run creates `.claude/kafu/settings.json`. Fill in the connectors you want and the daemon picks them up.
@@ -66,44 +66,50 @@ Allowlists are fail-closed: an empty `allowedUserIds` blocks everyone. See `comm
 3. Events: `app_mention`, `message.im`, `message.channels`, `message.groups`. Enable **Interactivity** for the Stop button.
 4. Install to the workspace and copy the `xoxb-` bot token.
 
-## Multi-user Slack
+## Teams: one Slack bot, everyone's own Claude
 
-Off by default. Turn it on to share one Slack bot across a team, with every request running on the requester's own Claude subscription:
+Turn on multi-user mode to share one Slack bot across a team. Every request runs with the requester's own Claude account and tools; nobody uses anyone else's.
 
 ```json
 {
-  "multiUser": { "enabled": true, "mcpConfig": ".mcp.json" },
+  "multiUser": { "enabled": true, "portal": { "enabled": true, "port": 4650, "publicUrl": "http://your-server:4650" } },
   "slack": { "allowedUserIds": ["*"] }
 }
 ```
 
-- The first time someone talks to the bot, it DMs them a Claude sign-in link (the official `claude setup-token` flow). They approve, paste the code back in the DM, and they're connected.
-- Each person gets their own long-lived token (stored encrypted in `.claude/kafu/users/`), their own Claude config folder (history, personal settings), and their own sessions. Nobody's run ever uses someone else's account or the operator's login.
-- MCP servers in `multiUser.mcpConfig` (default: the project's `.mcp.json`) are shared by everyone. Personal MCP servers live in each user's own config folder.
-- Runs are fully parallel across people and threads. If two people talk in the same thread, each gets their own session, seeded with the thread history.
-- Connections page (`multiUser.portal`): Slack hands each person a signed one-time link to a page where they sign in with Claude, connect GitHub through a device code, paste other service tokens, see their status and pick a model. Without the portal, the same setup works through DM commands: `login`, `logout`, `whoami`, `model`, `connect`, `connect <service>`, `disconnect <service>`.
-- `multiUser.directMessages: false` makes the bot answer DMs only with a private pointer to channels and the connections page.
-- Per-person service credentials: list them in `multiUser.credentials` (`id`, `label`, `env`, `help`, optional `pattern`). Set `"method": "github"` (with optional `scopes`) to connect GitHub through the device sign-in link instead of pasting a token. Each becomes a `connect <id>` command; the value is stored encrypted and exported as `env` only for that person's runs. Shared MCP servers that reference `${ENV}` for a credential the person hasn't connected are left out of their session. Only the person who started a run can press its Stop button. `/reset` only clears your own sessions.
-- `allowedUserIds: ["*"]` lets anyone in the workspace use it; list member IDs to restrict it.
-- The encryption key is generated at `.claude/kafu/secret.key`, or set `KAFU_SECRET_KEY` (32 bytes, base64) to keep it out of the project folder.
-- In the Slack app, enable the **Messages** tab under App Home so people can DM the bot.
+`allowedUserIds: ["*"]` lets anyone in the workspace use it; list member IDs to restrict it. Runs are fully parallel across people and threads; if two people talk in one thread, each gets their own session seeded with the thread history. Only the person who started a run can stop it.
 
-## Local agent
+### Recommended: run on each person's own computer
 
-In multi-user mode, people can run their requests on their own computer instead of the server. The server keeps Slack and routing; the work runs in the official `claude` on the person's machine, with their own Claude login, MCP servers, repos and git.
+The server keeps the Slack connection and routing. The work runs in the official `claude` on the person's machine, with their own Claude login, MCP servers, repos, git and SSO sessions. The server stores nobody's credentials.
 
 ```bash
-git clone <kafu repo> ~/kafu && cd ~/kafu && bun install && bun link
+bun install -g github:Abdullah-l/kafu
 kafu agent pair <server-url> <code>   # mention the bot with `pair` in Slack to get this command
 kafu agent                            # keep it running
 kafu agent status                     # pairing, Claude, gh and MCP status
 ```
 
 - The agent connects out to the server (`/agent` WebSocket on the portal port); nothing listens on the laptop.
-- Pairing codes work once and expire in 10 minutes. The device token is stored in `~/.kafu/agent.json` (`KAFU_AGENT_HOME` overrides the folder). `unpair` in Slack revokes it.
+- Pairing codes work once and expire in 10 minutes. The device token is stored in `~/.kafu/agent.json` (`KAFU_AGENT_HOME` overrides the folder). `unpair` in Slack revokes it; `status` shows whether your computer is connected.
 - `~/.kafu/agent.json` also sets `workspace` (where Claude runs, default your home folder), `permissionMode` (default `bypassPermissions`; use `acceptEdits` plus `allowedTools` to restrict) and `allowedTools`.
-- Paired people whose computer is offline get told so; there's no server fallback. Unpaired people keep running on the server.
-- Slack attachments are sent to the computer with the request; the Stop button and live progress work the same.
+- If someone is paired but their computer is offline, the bot tells them instead of running anything.
+- Slack attachments travel with the request; live progress and the Stop button work the same.
+- Update with the same `bun install -g` command.
+
+### Alternative: run on the server
+
+People who haven't paired a computer run on the server, each with their own Claude config folder, sessions and stored credentials. Use this with Claude Team/Enterprise or API-key setups; check that your plan's terms allow it before sharing personal subscriptions this way.
+
+- Connections page (`multiUser.portal`): Slack hands each person a private one-time link to a page where they sign in with Claude (the official `claude setup-token` flow), connect GitHub through a device code, paste other service tokens, see their status and pick a model. Without the portal, the same setup works through DM commands: `login`, `logout`, `whoami`, `model`, `connect`, `connect <service>`, `disconnect <service>`.
+- Per-person service credentials: list them in `multiUser.credentials` (`id`, `label`, `env`, `help`, optional `pattern`; `"method": "github"` with optional `scopes` for the device sign-in). Each value is stored encrypted and exported as `env` only for that person's runs. Shared MCP servers in `multiUser.mcpConfig` (default `.mcp.json`) that reference `${ENV}` for a credential the person hasn't connected are left out of their session.
+- Tokens are encrypted with `KAFU_SECRET_KEY` (32 bytes, base64), or a key generated at `.claude/kafu/secret.key`.
+- Everyone's runs share one OS user on the server. Isolate per user before opening it to people you don't trust.
+
+### Slack settings for teams
+
+- `multiUser.directMessages: false`: the bot answers DMs only with a private pointer to channels and the connections page. Also untick "Allow users to send messages" under App Home in the Slack app.
+- The connections page and the agent endpoint are plain HTTP on the portal port. Keep that port on a private network or put it behind HTTPS.
 
 ## CLI
 
@@ -114,7 +120,7 @@ kafu status [--all]
 kafu --stop | --stop-all | --clear
 ```
 
-(`kafu` = `bun run src/index.ts`.)
+From a clone, `kafu` is `bun run src/index.ts`.
 
 ## Development
 
