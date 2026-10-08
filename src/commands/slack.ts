@@ -885,7 +885,7 @@ function isUserAllowed(allowedUserIds: string[], userId: string): boolean {
   return allowedUserIds.length === 0 || allowedUserIds.includes("*") || allowedUserIds.includes(userId);
 }
 
-function accountIO(token: string, userId: string, channelId: string, threadTs: string): AccountIO {
+function accountIO(token: string, userId: string, channelId: string, threadTs: string, ephemeralThreadTs?: string): AccountIO {
   return {
     dm: (text) => sendMessageToUser(token, userId, text),
     reply: (text) => sendMessage(token, channelId, text, threadTs),
@@ -899,8 +899,9 @@ function accountIO(token: string, userId: string, channelId: string, threadTs: s
         user: userId,
         text,
         ...(blocks ? { blocks } : {}),
-        ...(threadTs ? { thread_ts: threadTs } : {}),
+        ...(ephemeralThreadTs ? { thread_ts: ephemeralThreadTs } : {}),
       });
+      console.log(`[${new Date().toLocaleTimeString()}] Slack ${userId}: sent private setup reply in ${channelId}${ephemeralThreadTs ? ` thread ${ephemeralThreadTs}` : ""}`);
     },
   };
 }
@@ -1013,7 +1014,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
   let identity: RunIdentity | undefined;
   let agentUserId: string | undefined;
   if (isMultiUser() && userId) {
-    const io = accountIO(config.botToken, userId, channelId, event.thread_ts ?? event.ts);
+    const io = accountIO(config.botToken, userId, channelId, event.thread_ts ?? event.ts, event.thread_ts);
     if (isDirectMessage && !getSettings().multiUser.directMessages) {
       await sendPortalLink(userId, io, "I don't take DMs. Mention me in a channel where you're working. Your connections are here:").catch((err) => {
         console.error(`[Slack] Failed to answer DM from ${userId}: ${err instanceof Error ? err.message : err}`);
@@ -1498,7 +1499,7 @@ async function handleBlockAction(payload: any): Promise<void> {
 
   if (actionId.startsWith(CONNECT_ACTION_PREFIX) && isMultiUser()) {
     const id = actionId.slice(CONNECT_ACTION_PREFIX.length);
-    await handleAccountMessage(user.id, `connect ${id}`, true, accountIO(config.botToken, user.id, channelId, message?.thread_ts ?? message?.ts ?? ""));
+    await handleAccountMessage(user.id, `connect ${id}`, true, accountIO(config.botToken, user.id, channelId, message?.thread_ts ?? message?.ts ?? "", message?.thread_ts));
     return;
   }
 
@@ -1543,7 +1544,7 @@ async function handleBlockAction(payload: any): Promise<void> {
     } else {
       identity = (await getRunIdentity(user.id)) ?? undefined;
       if (!identity || !threadTs) {
-        await sendLoginLink(user.id, accountIO(config.botToken, user.id, channelId, replyThreadTs ?? ""), false);
+        await sendLoginLink(user.id, accountIO(config.botToken, user.id, channelId, replyThreadTs ?? "", message?.thread_ts), false);
         return;
       }
     }
