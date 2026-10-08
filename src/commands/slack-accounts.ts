@@ -5,7 +5,10 @@ import { startLogin, submitLoginCode, cancelLogin, hasPendingLogin, pendingLogin
 import { MODELS, modelLabel } from "../models";
 import { getSettings, type CredentialSpec } from "../config";
 import { changeModel } from "../accounts";
-import { portalLink } from "../portal/server";
+import { portalLink, portalBaseUrl } from "../portal/server";
+import { createPairCode } from "../portal/auth";
+import { removeUserDevices } from "../users";
+import { disconnectAgents, isPaired, onlineAgent } from "../agent/relay";
 
 export interface AccountIO {
   dm(text: string): Promise<void>;
@@ -37,6 +40,7 @@ async function handlePortalMode(userId: string, lower: string, respond: (text: s
       "Ask me anything: mention me where you're working.",
       "",
       "`connect`: open your connections page (Claude, GitHub and other services)",
+      "`pair` / `unpair` / `status`: run requests on your own computer with `kafu agent`",
       "`model` / `model <name>`: show or change your model",
       "`help`: this message",
     ].join("\n"));
@@ -198,6 +202,33 @@ export async function handleAccountMessage(
   const [word, ...rest] = lower.split(/\s+/);
   const arg = rest.join(" ");
   const respond = isDirectMessage ? io.dm : io.reply;
+
+  if (portalEnabled() && lower === "pair") {
+    const command = `kafu agent pair ${portalBaseUrl()} ${await createPairCode(userId)}`;
+    const text = [
+      "Run this on your computer to let me work there (code expires in 10 minutes, works once):",
+      "```" + command + "```",
+      "Then start it with `kafu agent`. Your requests will run on your machine with your own Claude login, repos and git.",
+    ].join("\n");
+    if (io.ephemeral) await io.ephemeral(text);
+    else await io.dm(text);
+    return true;
+  }
+
+  if (portalEnabled() && lower === "unpair") {
+    const removed = await removeUserDevices(userId);
+    disconnectAgents(userId);
+    await respond(removed ? `Unpaired ${removed} computer${removed === 1 ? "" : "s"}. Your requests run on the server again.` : "You don't have a paired computer.");
+    return true;
+  }
+
+  if (portalEnabled() && lower === "status") {
+    const agent = onlineAgent(userId);
+    await respond(await isPaired(userId)
+      ? agent ? `Your computer "${agent.name}" is connected. Requests run there.` : "You're paired, but your computer isn't connected. Start `kafu agent` on it."
+      : "Not paired. Requests run on the server. Mention me with `pair` to run them on your own computer.");
+    return true;
+  }
 
   if (portalEnabled()) return handlePortalMode(userId, lower, respond, io);
 

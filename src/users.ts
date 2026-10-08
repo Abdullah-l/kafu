@@ -17,10 +17,17 @@ export interface UserRecord {
   updatedAt: string;
 }
 
+export interface DeviceRecord {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
 interface StoredUser {
   id: string;
   token: string | null;
   model: string;
+  devices?: DeviceRecord[];
   secrets?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
@@ -182,6 +189,22 @@ export async function clearUserToken(userId: string): Promise<boolean> {
   if (!(await readStored(userId))) return false;
   await updateUser(userId, (user) => { user.token = null; });
   return true;
+}
+
+export async function addUserDevice(userId: string, name: string): Promise<DeviceRecord> {
+  const device: DeviceRecord = { id: randomBytes(9).toString("base64url"), name: name.slice(0, 80), createdAt: new Date().toISOString() };
+  await updateUser(userId, (user) => { user.devices = [...(user.devices ?? []), device]; });
+  return device;
+}
+
+export async function listUserDevices(userId: string): Promise<DeviceRecord[]> {
+  return (await readStored(userId))?.devices ?? [];
+}
+
+export async function removeUserDevices(userId: string): Promise<number> {
+  const count = (await readStored(userId))?.devices?.length ?? 0;
+  if (count > 0) await updateUser(userId, (user) => { user.devices = []; });
+  return count;
 }
 
 export async function setUserModel(userId: string, model: string): Promise<void> {
