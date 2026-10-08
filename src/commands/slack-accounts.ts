@@ -206,9 +206,9 @@ export async function handleAccountMessage(
   if (portalEnabled() && lower === "pair") {
     const command = `kafu agent pair ${portalBaseUrl()} ${await createPairCode(userId)}`;
     const text = [
-      "Run this on your computer to let me work there (code expires in 10 minutes, works once):",
-      "```" + command + "```",
-      "Then start it with `kafu agent`. Your requests will run on your machine with your own Claude login, repos and git.",
+      "Run this on your computer to let me work there. It needs Bun (bun.sh) and Claude Code signed in.",
+      "```" + `${getSettings().multiUser.portal.agentInstall}\n${command}\nkafu agent` + "```",
+      "The pairing code works once and expires in 10 minutes. Keep `kafu agent` running; your requests will run on your machine with your own Claude login, repos and git.",
     ].join("\n");
     if (io.ephemeral) await io.ephemeral(text);
     else await io.dm(text);
