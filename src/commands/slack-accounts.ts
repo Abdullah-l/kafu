@@ -24,11 +24,11 @@ export function portalEnabled(): boolean {
 
 export async function sendPortalLink(userId: string, io: AccountIO, intro: string): Promise<void> {
   const url = await portalLink(userId);
-  const text = `${intro} <${url}|Open your connections> (private link, expires in 15 minutes)`;
+  const text = `${intro} <${url}|Open your connections> (expires in 15 minutes)`;
   const blocks = [
     { type: "section", text: { type: "mrkdwn", text: intro } },
     { type: "actions", elements: [{ type: "button", style: "primary", text: { type: "plain_text", text: "Open your connections" }, url }] },
-    { type: "context", elements: [{ type: "mrkdwn", text: "Only you can see this. The link is private and expires in 15 minutes." }] },
+    { type: "context", elements: [{ type: "mrkdwn", text: "The link expires in 15 minutes." }] },
   ];
   if (io.ephemeral) await io.ephemeral(text, blocks);
   else await io.dm(text);
