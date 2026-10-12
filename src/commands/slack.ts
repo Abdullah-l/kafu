@@ -101,6 +101,8 @@ interface SlackSocketPayload {
     reason?: string;
   };
   reason?: string;
+  retry_attempt?: number;
+  retry_reason?: string;
 }
 
 let ws: WebSocket | null = null;
@@ -110,7 +112,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let proactiveReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 const recentlyProcessed = new Map<string, number>();
-const DEDUP_TTL_MS = 10_000;
+const DEDUP_TTL_MS = 10 * 60_000;
 
 const lastBotMessageTs = new Map<string, string>();
 
@@ -1740,6 +1742,9 @@ async function handleSocketPayload(
 
   if (type === "events_api" && data.payload?.event) {
     const event = data.payload.event;
+    if (data.retry_attempt) {
+      console.log(`[${new Date().toLocaleTimeString()}] Slack resent ${event.type} ${event.channel ?? ""}:${event.ts ?? ""} (attempt ${data.retry_attempt}, ${data.retry_reason ?? "no reason"})`);
+    }
 
     if (event.type === "assistant_thread_started") {
       const threadChannel = (event as any).assistant_thread?.channel_id;
