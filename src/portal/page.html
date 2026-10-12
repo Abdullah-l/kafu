@@ -93,6 +93,28 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
     return node;
   }
 
+  function copyText(text, button) {
+    var done = function () { if (button) { button.textContent = "Copied"; setTimeout(function () { button.textContent = "Copy code"; }, 1500); } };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text); done(); });
+    } else {
+      fallbackCopy(text);
+      done();
+    }
+  }
+
+  function fallbackCopy(text) {
+    var area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(area);
+  }
+
   function pill(kind, text) { return el("span", { class: "pill " + kind, text: text }); }
 
   function helpText(text) {
@@ -168,7 +190,7 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
       body.push(el("div", { class: "code", text: s.device.code }));
       body.push(el("div", { class: "actions" }, [
         el("a", { class: "button primary", href: s.device.url, target: "_blank", rel: "noopener", text: "Open GitHub" }),
-        el("button", { class: "ghost", text: "Copy code", onclick: function () { navigator.clipboard && navigator.clipboard.writeText(s.device.code); } }),
+        el("button", { class: "ghost", text: "Copy code", onclick: function (e) { copyText(s.device.code, e.target); } }),
       ]));
     } else {
       status = s.device && s.device.status === "error" ? pill("err", "Sign-in failed") : pill("off", "Not connected");
