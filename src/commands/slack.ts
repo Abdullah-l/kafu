@@ -9,7 +9,7 @@ import { transcribeAudioToText } from "../whisper";
 import { resolveSkillPrompt } from "../skills";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { getRunIdentity, type RunIdentity } from "../users";
-import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, CONNECT_ACTION_PREFIX, type AccountIO } from "./slack-accounts";
+import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, CONNECT_ACTION_PREFIX, LINK_ACTION_ID, type AccountIO } from "./slack-accounts";
 import { mkdir, realpath } from "node:fs/promises";
 import { extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
@@ -1496,8 +1496,10 @@ async function handleBlockAction(payload: any): Promise<void> {
     return;
   }
 
-  const action = actions[0];
+  const action = actions[0] as (typeof actions)[number] & { url?: string };
   const actionId = action.action_id;
+
+  if (actionId === LINK_ACTION_ID || action.url) return;
 
   if (actionId.startsWith(CONNECT_ACTION_PREFIX) && isMultiUser()) {
     const id = actionId.slice(CONNECT_ACTION_PREFIX.length);

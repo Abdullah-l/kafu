@@ -27,7 +27,7 @@ export async function sendPortalLink(userId: string, io: AccountIO, intro: strin
   const text = `${intro} <${url}|Open your connections> (expires in 15 minutes)`;
   const blocks = [
     { type: "section", text: { type: "mrkdwn", text: intro } },
-    { type: "actions", elements: [{ type: "button", style: "primary", text: { type: "plain_text", text: "Open your connections" }, url }] },
+    { type: "actions", elements: [{ type: "button", style: "primary", action_id: LINK_ACTION_ID, text: { type: "plain_text", text: "Open your connections" }, url }] },
     { type: "context", elements: [{ type: "mrkdwn", text: "The link expires in 15 minutes." }] },
   ];
   if (io.ephemeral) await io.ephemeral(text, blocks);
@@ -65,6 +65,7 @@ async function handlePortalMode(userId: string, lower: string, respond: (text: s
 }
 
 export const CONNECT_ACTION_PREFIX = "kafu_connect:";
+export const LINK_ACTION_ID = "kafu_open_link";
 
 const AUTH_FAILURE_RE = /failed to authenticate|oauth (access )?token (is invalid|has expired)|api error: 401|authentication_(error|failed)|invalid (api key|bearer token|x-api-key)|please run \/login|not logged in|token.*revoked/i;
 
