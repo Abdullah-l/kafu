@@ -1253,12 +1253,14 @@ async function runForUser(opts: {
         system: await agentSystemPrompt(),
         timeoutMs: getSettings().timeouts.slack * 60_000,
         attachments: await loadAttachments(opts.attachmentPaths ?? []),
+        protectedRepos: getSettings().multiUser.protectedRepos,
       },
       opts.onToolEvent,
       opts.cancelKey,
     );
   }
-  return runUserMessage("slack", opts.prompt, opts.sessionThreadId, opts.agentName, undefined, opts.onToolEvent, undefined, opts.cancelKey, opts.identity);
+  const identity = opts.identity ? { ...opts.identity, readable: opts.attachmentPaths ?? [] } : undefined;
+  return runUserMessage("slack", opts.prompt, opts.sessionThreadId, opts.agentName, undefined, opts.onToolEvent, undefined, opts.cancelKey, identity);
 }
 
 async function handleMessage(event: SlackMessage): Promise<void> {
@@ -1605,7 +1607,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
 
     const agentDirThread = actingUserId && isDirectMessage && !inThread ? "dm" : replyThreadTs;
     const agentName = sessionThreadId
-      ? (() => { try { return agentDirKey(`slack-${channelId}`, agentDirThread); } catch { return undefined; } })()
+      ? (() => { try { return agentDirKey(actingUserId ? `slack-${channelId}-${actingUserId}` : `slack-${channelId}`, agentDirThread); } catch { return undefined; } })()
       : undefined;
 
     let result;
@@ -1937,7 +1939,7 @@ async function handleBlockAction(payload: any): Promise<void> {
 
   const prompt = `[Slack interactive from ${user.id}]\nUser clicked: "${label}" (action: ${actionId}, value: ${value})`;
   const agentName = sessionThreadId
-    ? (() => { try { return agentDirKey(`slack-${channelId}`, threadTs!); } catch { return undefined; } })()
+    ? (() => { try { return agentDirKey(isMultiUser() ? `slack-${channelId}-${user.id}` : `slack-${channelId}`, threadTs!); } catch { return undefined; } })()
     : undefined;
   try {
     const result = await runForUser({ agentUserId, prompt, sessionThreadId, agentName, identity });

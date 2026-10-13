@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile, realpath, rename } from "fs/promises";
 import { join, dirname, resolve, sep } from "path";
+import { isolationEnabled, runUid, prepareSandbox, sandboxCommand } from "./isolation";
 import { execSync } from "child_process";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "fs";
 import {
@@ -362,8 +363,16 @@ function isNotFoundError(error: unknown): boolean {
   return /enoent|no such file or directory/i.test(message);
 }
 
+export const RUN_AS_ENV = "KAFU_RUN_AS_UID";
+
+function sandboxArgs(args: string[], baseEnv: Record<string, string>): string[] {
+  const uid = Number(baseEnv[RUN_AS_ENV]);
+  return Number.isInteger(uid) && uid > 0 ? sandboxCommand(args, uid) : args;
+}
+
 function buildChildEnv(baseEnv: Record<string, string>, model: string, api: string): Record<string, string> {
   const childEnv: Record<string, string> = { ...baseEnv };
+  delete childEnv[RUN_AS_ENV];
   if (api.trim()) childEnv.ANTHROPIC_AUTH_TOKEN = api.trim();
   return childEnv;
 }
@@ -426,7 +435,7 @@ async function runClaudeOnce(
   const args = [...baseArgs];
   if (model.trim()) args.push("--model", model.trim());
 
-  const proc = Bun.spawn(args, {
+  const proc = Bun.spawn(sandboxArgs(args, baseEnv), {
     stdout: "pipe",
     stderr: "pipe",
     env: buildChildEnv(baseEnv, model, api),
@@ -512,7 +521,7 @@ export async function runClaudeStream(
   const args = [...baseArgs];
   if (model.trim()) args.push("--model", model.trim());
 
-  const proc = Bun.spawn(args, {
+  const proc = Bun.spawn(sandboxArgs(args, baseEnv), {
     stdout: "pipe",
     stderr: "pipe",
     env: buildChildEnv(baseEnv, model, api),
@@ -668,7 +677,7 @@ async function runClaudeStreaming(
   const args = [...baseArgs];
   if (model.trim()) args.push("--model", model.trim());
 
-  const proc = Bun.spawn(args, {
+  const proc = Bun.spawn(sandboxArgs(args, baseEnv), {
     stdout: "pipe",
     stderr: "pipe",
     env: buildChildEnv(baseEnv, model, api),
@@ -1088,8 +1097,10 @@ async function execClaude(
   const args = [CLAUDE_EXECUTABLE, "-p", prompt, "--output-format", "stream-json", "--verbose", ...securityArgs];
   const mcpArgs: string[] = [];
   let missingCredentials: string[] = [];
+  let mcpPath: string | null = null;
   if (identity) {
     const mcp = await identityMcpConfig(identity);
+    mcpPath = mcp.path;
     if (mcp.path) mcpArgs.push("--mcp-config", mcp.path);
     missingCredentials = mcp.missing;
   }
@@ -1136,6 +1147,22 @@ async function execClaude(
 
   const baseEnv = identity ? identitySpawnEnv(identity) : cleanSpawnEnv();
   const spawnCwd = agentName ? await ensureAgentDir(agentName) : undefined;
+  if (identity && isolationEnabled()) {
+    const uid = await runUid(identity.userId);
+    const userDir = dirname(identity.configDir);
+    const homeDir = join(userDir, "home");
+    await prepareSandbox({
+      uid,
+      userDir,
+      configDir: identity.configDir,
+      homeDir,
+      workDir: spawnCwd,
+      readable: [...(mcpPath && mcpPath.startsWith(userDir + sep) ? [mcpPath] : []), ...(identity.readable ?? [])],
+    });
+    baseEnv.HOME = homeDir;
+    if (spawnCwd) baseEnv.KAFU_WORKDIR = spawnCwd;
+    baseEnv[RUN_AS_ENV] = String(uid);
+  }
 
   let exec = await runClaudeStream(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs, spawnCwd, onChunk, onToolEvent, cancelKey);
   const primaryRateLimit = extractRateLimitMessage(exec.rawStdout, exec.stderr);

@@ -196,15 +196,17 @@ async function removeServerTranscripts(userId: string, sessionId: string): Promi
   }
 }
 
-async function removeWorkDir(conversation: Conversation): Promise<void> {
-  let name: string;
-  try {
-    name = agentDirKey(`slack-${conversation.channelId}`, conversation.threadTs);
-  } catch {
-    return;
+async function removeWorkDir(userId: string, conversation: Conversation): Promise<void> {
+  for (const prefix of [`slack-${conversation.channelId}-${userId}`, `slack-${conversation.channelId}`]) {
+    let name: string;
+    try {
+      name = agentDirKey(prefix, conversation.threadTs);
+    } catch {
+      continue;
+    }
+    const path = join(getAgentsDir(), name);
+    if (existsSync(path)) await rm(path, { recursive: true, force: true });
   }
-  const path = join(getAgentsDir(), name);
-  if (existsSync(path)) await rm(path, { recursive: true, force: true });
 }
 
 async function forgetThread(userId: string, conversation: Conversation): Promise<void> {
@@ -215,7 +217,7 @@ async function forgetThread(userId: string, conversation: Conversation): Promise
     await removeThreadSession(key);
   }
   await resetFallbackSession(undefined, key);
-  await removeWorkDir(conversation);
+  await removeWorkDir(userId, conversation);
   forgetOnAgents(userId, key);
   for (const listener of deleteListeners) {
     try { listener(userId, conversation); } catch {}

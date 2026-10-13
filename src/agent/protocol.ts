@@ -13,6 +13,7 @@ export interface RunRequest {
   system: string;
   timeoutMs: number;
   attachments: Attachment[];
+  protectedRepos?: string[];
 }
 
 export type ServerMessage =

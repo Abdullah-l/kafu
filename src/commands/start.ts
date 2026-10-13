@@ -11,6 +11,7 @@ import { getOrCreateWebToken } from "../ui/auth";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { PluginManager, setPluginManager } from "../plugins";
 import { startPortal, stopPortal } from "../portal/server";
+import { isolationEnabled, hardenWorkspace, writeManagedSettings } from "../isolation";
 
 const CLAUDE_DIR = join(process.cwd(), ".claude");
 const STATUSLINE_FILE = join(CLAUDE_DIR, "statusline.cjs");
@@ -344,6 +345,16 @@ export async function start(args: string[] = []) {
       slackBotToken = "";
       slackAppToken = "";
       console.log(`[${ts()}] Slack: disabled`);
+    }
+  }
+
+  if (currentSettings.multiUser.enabled) {
+    if (isolationEnabled()) {
+      await hardenWorkspace();
+      await writeManagedSettings(currentSettings.multiUser.protectedRepos);
+      console.log(`[${ts()}] Isolation: each person's runs use their own OS user; ${currentSettings.multiUser.protectedRepos.length} protected repo(s)`);
+    } else {
+      console.warn(`[${ts()}] Isolation: off (kafu isn't running as root), so everyone's runs share one OS user`);
     }
   }
 
