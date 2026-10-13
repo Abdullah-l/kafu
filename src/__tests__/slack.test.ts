@@ -5,6 +5,7 @@ import {
   extractChannelReadDirectives,
   extractReactionDirective,
   assistantKey,
+  parseSlackLinks,
 } from "../commands/slack";
 
 describe("assistantKey", () => {
@@ -72,5 +73,20 @@ describe("extractReactionDirective", () => {
   test("returns null emoji when none present", () => {
     const { reactionEmoji } = extractReactionDirective("plain text");
     expect(reactionEmoji).toBeNull();
+  });
+});
+
+describe("parseSlackLinks", () => {
+  test("reads channel, message and thread from permalinks", () => {
+    const text = "check <https://acme.slack.com/archives/C09KCH37Z7C/p1791814443964939|this> and https://acme.slack.com/archives/C0AB/p1791814500000100?thread_ts=1791814443.964939&cid=C0AB";
+    expect(parseSlackLinks(text)).toEqual([
+      { url: "https://acme.slack.com/archives/C09KCH37Z7C/p1791814443964939", channelId: "C09KCH37Z7C", ts: "1791814443.964939", threadTs: "1791814443.964939" },
+      { url: "https://acme.slack.com/archives/C0AB/p1791814500000100?thread_ts=1791814443.964939&cid=C0AB", channelId: "C0AB", ts: "1791814500.000100", threadTs: "1791814443.964939" },
+    ]);
+  });
+
+  test("dedupes the same thread and ignores other links", () => {
+    const link = "https://acme.slack.com/archives/C1/p1700000000000100";
+    expect(parseSlackLinks(`${link} <${link}|${link}> https://example.com/archives/C1/p1`)).toHaveLength(1);
   });
 });

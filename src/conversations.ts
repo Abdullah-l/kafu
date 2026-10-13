@@ -141,6 +141,13 @@ export async function recordTurn(
         turns: [],
       };
     }
+    if (!conversation.permalink && conversation.turns.length > 0) {
+      const link = (await entry.resolveLink?.().catch(() => null)) ?? null;
+      if (link) {
+        conversation.permalink = link.permalink;
+        conversation.channelName ||= link.channelName;
+      }
+    }
     conversation.mode = entry.mode;
     conversation.updatedAt = now;
     conversation.turns.push({ at: now, message: clip(entry.message), reply: clip(entry.reply), status: entry.status });
