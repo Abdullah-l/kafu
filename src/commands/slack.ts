@@ -1,3 +1,5 @@
+import { watchRunMeta, type RunMeta } from "../runner";
+import { modelLabel } from "../models";
 import { ensureProjectClaudeMd, runUserMessage, compactCurrentSession, agentDirKey, killRun, consumeUserStopped, prefixUserMessageWithClock, PROJECT_CLAUDE_MD } from "../runner";
 import { isPaired, onlineAgent, runOnAgent, loadAttachments } from "../agent/relay";
 import { getUser } from "../users";
@@ -333,12 +335,37 @@ const PROGRESS_LINE_MAX = 88;
 
 const STOP_ACTION_ID = "cc_stop";
 
-function progressBlocks(header: string, activity: string[], cancelKey: string): Record<string, unknown>[] {
+export function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(n);
+}
+
+export function runStatusLine(meta: RunMeta, elapsedMs: number): string {
+  const parts = [`⏱ ${formatElapsed(elapsedMs)}`];
+  if (meta.model) parts.push(`🧠 ${modelLabel(meta.model.replace(/\[1m\]$/i, ""))}`);
+  if (meta.contextTokens) {
+    const window = meta.contextWindow ?? 200_000;
+    parts.push(`📚 ${formatTokens(meta.contextTokens)} / ${formatTokens(window)} context (${Math.round((meta.contextTokens / window) * 100)}%)`);
+  }
+  return parts.join("   ");
+}
+
+function progressBlocks(header: string, activity: string[], cancelKey: string, status?: string): Record<string, unknown>[] {
   const feed = activity.length
     ? "```\n" + activity.slice(-PROGRESS_MAX_LINES).join("\n").slice(0, 2800) + "\n```"
     : "_starting…_";
   return [
     { type: "section", text: { type: "mrkdwn", text: `${header}\n${feed}` } },
+    ...(status ? [{ type: "context", elements: [{ type: "mrkdwn", text: status }] }] : []),
     {
       type: "actions",
       elements: [
@@ -387,12 +414,16 @@ async function collapseProgress(
   channelId: string,
   messageTs: string,
   text: string,
+  status?: string,
 ): Promise<void> {
   await slackApi(token, "chat.update", {
     channel: channelId,
     ts: messageTs,
     text,
-    blocks: [{ type: "section", text: { type: "mrkdwn", text } }],
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text } },
+      ...(status ? [{ type: "context", elements: [{ type: "mrkdwn", text: status }] }] : []),
+    ],
   }).catch((err) => {
     debugLog(`collapseProgress failed: ${err instanceof Error ? err.message : err}`);
   });
@@ -430,6 +461,7 @@ async function postMessage(
 }
 
 const STREAM_UPDATE_INTERVAL_MS = 1200;
+const PROGRESS_TICK_MS = 5000;
 
 function extractReactionDirective(text: string): { cleanedText: string; reactionEmoji: string | null } {
   let reactionEmoji: string | null = null;
@@ -1462,23 +1494,31 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     }, 20_000);
 
     const activity: string[] = [];
+    const startedAt = Date.now();
+    const runMeta: RunMeta = {};
     const progressTs = await postBlocks(
       config.botToken,
       channelId,
       "Working…",
-      progressBlocks("🛠️ *Working…*", activity, cancelKey),
+      progressBlocks("🛠️ *Working…*", activity, cancelKey, runStatusLine(runMeta, 0)),
       replyThreadTs,
     );
     let progressDirty = false;
+    let lastFlushAt = Date.now();
+    const stopMetaWatch = watchRunMeta(cancelKey, (meta) => {
+      for (const [k, v] of Object.entries(meta)) if (v !== undefined) (runMeta as Record<string, unknown>)[k] = v;
+      progressDirty = true;
+    });
     const flushProgress = async () => {
-      if (!progressTs || !progressDirty) return;
+      if (!progressTs || (!progressDirty && Date.now() - lastFlushAt < PROGRESS_TICK_MS)) return;
       progressDirty = false;
+      lastFlushAt = Date.now();
       await updateBlocks(
         config.botToken,
         channelId,
         progressTs,
         "Working…",
-        progressBlocks("🛠️ *Working…*", activity, cancelKey),
+        progressBlocks("🛠️ *Working…*", activity, cancelKey, runStatusLine(runMeta, Date.now() - startedAt)),
       );
     };
     const progressTimer = progressTs
@@ -1509,6 +1549,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     } finally {
       clearInterval(statusRefreshInterval);
       if (progressTimer) clearInterval(progressTimer);
+      stopMetaWatch();
     }
 
     const stopped = consumeUserStopped(cancelKey);
@@ -1524,7 +1565,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       await removeReaction(config.botToken, channelId, event.ts, "hourglass_flowing_sand");
       await clearAssistantStatus(config.botToken, channelId, replyThreadTs);
       if (progressTs) {
-        await collapseProgress(config.botToken, channelId, progressTs, "⏹ Stopped.");
+        await collapseProgress(config.botToken, channelId, progressTs, "⏹ Stopped.", runStatusLine(runMeta, Date.now() - startedAt));
       } else {
         await sendMessage(config.botToken, channelId, "⏹ Stopped.", replyThreadTs);
       }
@@ -1541,7 +1582,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       recordedReply = friendly;
       recordedStatus = "error";
       if (progressTs) {
-        await collapseProgress(config.botToken, channelId, progressTs, `⚠️ ${friendly}`);
+        await collapseProgress(config.botToken, channelId, progressTs, `⚠️ ${friendly}`, runStatusLine(runMeta, Date.now() - startedAt));
       } else {
         await sendMessage(config.botToken, channelId, friendly, replyThreadTs);
       }
@@ -1667,7 +1708,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
         if (progressTs) {
           const steps = activity.filter((l) => l.startsWith("●")).length;
           if (finalText || steps > 0) {
-            await collapseProgress(config.botToken, channelId, progressTs, `✓ Done${steps ? ` — ${steps} step${steps === 1 ? "" : "s"}` : ""}`);
+            await collapseProgress(config.botToken, channelId, progressTs, `✓ Done${steps ? ` — ${steps} step${steps === 1 ? "" : "s"}` : ""}`, runStatusLine(runMeta, Date.now() - startedAt));
           } else {
             await deleteMessage(config.botToken, channelId, progressTs);
           }

@@ -474,6 +474,30 @@ async function runClaudeOnce(
   }
 }
 
+export interface RunMeta {
+  model?: string;
+  contextTokens?: number;
+  contextWindow?: number;
+}
+
+const metaListeners = new Map<string, (meta: RunMeta) => void>();
+
+export function watchRunMeta(key: string, listener: (meta: RunMeta) => void): () => void {
+  metaListeners.set(key, listener);
+  return () => {
+    if (metaListeners.get(key) === listener) metaListeners.delete(key);
+  };
+}
+
+export function emitRunMeta(key: string | undefined, meta: RunMeta): void {
+  if (!key) return;
+  try { metaListeners.get(key)?.(meta); } catch {}
+}
+
+function contextWindowFor(...models: string[]): number {
+  return models.some((m) => /\[1m\]/i.test(m)) ? 1_000_000 : 200_000;
+}
+
 export async function runClaudeStream(
   baseArgs: string[],
   model: string,
@@ -503,6 +527,7 @@ export async function runClaudeStream(
 
   let streamDelivered = "";
   let streamLastMsgId = "";
+  let initModel = "";
   const streamPendingToolCalls = new Map<string, string>();
 
   const readStdout = async () => {
@@ -525,6 +550,15 @@ export async function runClaudeStream(
           }
           if (event.type === "result" && typeof event.result === "string") {
             resultText = event.result;
+          }
+          if (cancelKey && event.type === "system" && event.subtype === "init" && typeof event.model === "string") {
+            initModel = event.model;
+            emitRunMeta(cancelKey, { model: initModel, contextWindow: contextWindowFor(model, initModel) });
+          }
+          if (cancelKey && event.type === "assistant" && (event.message as any)?.usage) {
+            const u = (event.message as any).usage;
+            const tokens = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.output_tokens ?? 0);
+            if (tokens > 0) emitRunMeta(cancelKey, { contextTokens: tokens, contextWindow: contextWindowFor(model, initModel) });
           }
           if ((onChunk || onToolEvent) && event.type === "assistant" && (event.message as any)?.content) {
             const msg = event.message as any;

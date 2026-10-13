@@ -24,6 +24,7 @@ export type ServerMessage =
 export type AgentMessage =
   | { type: "hello"; name: string; version: string }
   | { type: "event"; id: string; line: string }
+  | { type: "meta"; id: string; model?: string; contextTokens?: number; contextWindow?: number }
   | { type: "result"; id: string; stdout: string; stderr: string; exitCode: number };
 
 export const AGENT_PROTOCOL_VERSION = "1";
