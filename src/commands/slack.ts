@@ -13,8 +13,8 @@ import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wi
 import { getRunIdentity, type RunIdentity } from "../users";
 import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, CONNECT_ACTION_PREFIX, LINK_ACTION_ID, type AccountIO } from "./slack-accounts";
 import { recordTurn, setAssistantName, onConversationDeleted, threadSessionKey, type TurnStatus } from "../conversations";
-import { mkdir, realpath } from "node:fs/promises";
-import { extname, join, resolve, isAbsolute, sep } from "node:path";
+import { mkdir, realpath, rename } from "node:fs/promises";
+import { dirname, extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
 
 const SLACK_DIRECTIVES_PATH = join(import.meta.dir, "..", "..", "prompts", "slack", "DIRECTIVES.md");
@@ -461,6 +461,46 @@ async function postMessage(
 }
 
 const STREAM_UPDATE_INTERVAL_MS = 1200;
+const INFLIGHT_FILE = join(process.cwd(), ".claude", "kafu", "inflight.json");
+const INTERRUPTED_TEXT = "⚠️ Interrupted: I restarted while working on this. Ask me again to pick it up.";
+
+interface InflightRun {
+  channelId: string;
+  progressTs: string;
+  messageTs: string;
+  startedAt: string;
+}
+
+let inflightWrite: Promise<void> = Promise.resolve();
+
+async function readInflight(): Promise<InflightRun[]> {
+  try {
+    return JSON.parse(await Bun.file(INFLIGHT_FILE).text()) as InflightRun[];
+  } catch {
+    return [];
+  }
+}
+
+function updateInflight(change: (runs: InflightRun[]) => InflightRun[]): Promise<void> {
+  inflightWrite = inflightWrite.then(async () => {
+    const next = change(await readInflight());
+    await mkdir(dirname(INFLIGHT_FILE), { recursive: true });
+    await Bun.write(`${INFLIGHT_FILE}.tmp`, JSON.stringify(next, null, 2) + "\n");
+    await rename(`${INFLIGHT_FILE}.tmp`, INFLIGHT_FILE);
+  }).catch((err) => console.error(`[Slack] Failed to update in-flight runs: ${err instanceof Error ? err.message : err}`));
+  return inflightWrite;
+}
+
+async function recoverInterruptedRuns(token: string): Promise<void> {
+  const runs = await readInflight();
+  if (runs.length === 0) return;
+  for (const run of runs) {
+    await collapseProgress(token, run.channelId, run.progressTs, INTERRUPTED_TEXT);
+    await removeReaction(token, run.channelId, run.messageTs, "hourglass_flowing_sand");
+  }
+  await updateInflight(() => []);
+  console.log(`[${new Date().toLocaleTimeString()}] Slack: marked ${runs.length} interrupted run${runs.length === 1 ? "" : "s"}`);
+}
 const PROGRESS_TICK_MS = 5000;
 
 function extractReactionDirective(text: string): { cleanedText: string; reactionEmoji: string | null } {
@@ -1503,6 +1543,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       progressBlocks("🛠️ *Working…*", activity, cancelKey, runStatusLine(runMeta, 0)),
       replyThreadTs,
     );
+    if (progressTs) await updateInflight((runs) => [...runs, { channelId, progressTs, messageTs: event.ts, startedAt: new Date(startedAt).toISOString() }]);
     let progressDirty = false;
     let lastFlushAt = Date.now();
     const stopMetaWatch = watchRunMeta(cancelKey, (meta) => {
@@ -1550,6 +1591,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       clearInterval(statusRefreshInterval);
       if (progressTimer) clearInterval(progressTimer);
       stopMetaWatch();
+      if (progressTs) await updateInflight((runs) => runs.filter((r) => r.progressTs !== progressTs));
     }
 
     const stopped = consumeUserStopped(cancelKey);
@@ -2245,6 +2287,7 @@ export function startSlack(debug = false): void {
       console.error(`[Slack] auth.test failed: ${err instanceof Error ? err.message : err}`);
     }
 
+    await recoverInterruptedRuns(config.botToken).catch(() => {});
     connectSocket(config.appToken);
   })().catch((err) => {
     console.error(`[Slack] Fatal: ${err}`);
@@ -2281,6 +2324,7 @@ export async function slack(): Promise<void> {
     console.error(`[Slack] auth.test failed: ${err instanceof Error ? err.message : err}`);
   }
 
+  await recoverInterruptedRuns(config.botToken).catch(() => {});
   connectSocket(config.appToken);
   await new Promise(() => {});
 }
