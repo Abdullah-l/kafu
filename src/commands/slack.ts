@@ -738,15 +738,21 @@ async function fetchThreadHistory(
   }));
 }
 
-function formatThreadHistoryAsContext(
+async function slackUserLabel(token: string, userId: string): Promise<string> {
+  const name = await slackUserName(token, userId);
+  return name ? `${name} (<@${userId}>)` : `<@${userId}>`;
+}
+
+async function formatThreadHistoryAsContext(
+  token: string,
   messages: { role: string; text: string; user?: string; ts: string }[],
-): string {
+): Promise<string> {
   if (messages.length === 0) return "";
 
   const lines = ["--- Thread History (previous messages) ---"];
   for (const msg of messages) {
-    const sender = msg.role === "assistant" ? "Bot" : `User ${msg.user ?? "unknown"}`;
-    lines.push(`[${sender}]: ${msg.text}`);
+    const sender = msg.role === "assistant" ? "Bot" : msg.user ? await slackUserLabel(token, msg.user) : "unknown";
+    lines.push(`[${sender}]: ${await withNames(token, msg.text)}`);
   }
   lines.push("--- End of Thread History ---");
   lines.push("");
@@ -775,6 +781,35 @@ interface SlackReply {
   username?: string;
   ts: string;
   files?: SlackFile[];
+}
+
+// Claude writes GitHub markdown; Slack mrkdwn shows **bold**, # headings and [links](url) literally.
+export function markdownToMrkdwn(text: string): string {
+  return text.split(/(```[\s\S]*?```|`[^`\n]+`)/g).map((part, i) => {
+    if (i % 2 === 1) return part;
+    return part
+      .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, "<$2|$1>")
+      .replace(/^#{1,6}[ \t]+(.+?)[ \t]*#*$/gm, "\u0001$1\u0001")
+      .replace(/\*\*(?=\S)([^\n]+?)(?<=\S)\*\*/g, "\u0001$1\u0001")
+      .replace(/(?<![*\w])\*(?=[^\s*])([^*\n]+?)(?<=\S)\*(?![*\w])/g, "_$1_")
+      .replace(/~~(?=\S)([^~\n]+?)(?<=\S)~~/g, "~$1~")
+      .replace(/^([ \t]*)[-*+][ \t]+/gm, "$1• ")
+      .replace(/\u0001+/g, "*");
+  }).join("");
+}
+
+// Swap bare Slack user IDs (U0ABC...) for the person's name so replies don't show raw IDs.
+async function withoutBareUserIds(token: string, text: string): Promise<string> {
+  const re = /(?<![<@\w])([UW][A-Z0-9]{8,})(?![\w>|])/g;
+  const ids = [...new Set([...text.matchAll(re)].map((m) => m[1]))];
+  if (ids.length === 0) return text;
+  const names = new Map<string, string>();
+  await Promise.all(ids.map(async (id) => names.set(id, await slackUserName(token, id))));
+  return text.replace(re, (whole, id) => names.get(id) || whole);
+}
+
+async function toSlackReply(token: string, text: string): Promise<string> {
+  return markdownToMrkdwn(await withoutBareUserIds(token, text));
 }
 
 export function parseSlackLinks(text: string): { url: string; channelId: string; ts: string; threadTs: string }[] {
@@ -1356,7 +1391,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
             .filter((m) => m.ts !== event.ts)
             .map((m) => ({ ...m, text: sanitizeUserInput(m.text) }));
           if (pastMessages.length > 0) {
-            threadHistoryContext = formatThreadHistoryAsContext(pastMessages);
+            threadHistoryContext = await formatThreadHistoryAsContext(config.botToken, pastMessages);
             debugLog(`Loaded ${pastMessages.length} thread history messages for ${sessionThreadId}`);
           }
         } catch (err) {
@@ -1473,7 +1508,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
 
     const slackDirectives = await loadSlackDirectives();
     const channelType = isDirectMessage ? "DM" : inThread ? "thread" : "channel";
-    const promptParts = [`[Slack from ${label} in ${channelType} ${channelId}${inThread ? ` thread ${event.thread_ts}` : ""}]`];
+    const promptParts = [`[Slack from ${userId ? await slackUserLabel(config.botToken, userId) : label} in ${channelType} ${channelId}${inThread ? ` thread ${event.thread_ts}` : ""}]`];
     if (slackDirectives) {
       promptParts.push(slackDirectives);
     }
@@ -1633,7 +1668,8 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       const { cleanedText: afterEdit, editContent, deleteCount, deleteMatches } = extractEditDirective(afterReact);
       const { cleanedText: afterUpload, uploads } = extractUploadDirectives(afterEdit);
       const { cleanedText: afterChannelRead, channelReads } = extractChannelReadDirectives(afterUpload);
-      const { cleanedText: finalText, buttons, select } = extractBlockKitDirectives(afterChannelRead);
+      const { cleanedText: blockText, buttons, select } = extractBlockKitDirectives(afterChannelRead);
+      const finalText = await toSlackReply(config.botToken, blockText);
 
       const reuseProgress = !!progressTs && !!finalText && !buttons && !select && finalText.length <= 3800;
       recordedReply = finalText || editContent || "";
@@ -1679,12 +1715,12 @@ async function handleMessage(event: SlackMessage): Promise<void> {
         try {
           const lastTs = lastBotMessageTs.get(msgKey);
           if (lastTs) {
-            await updateMessage(config.botToken, channelId, lastTs, editContent);
+            await updateMessage(config.botToken, channelId, lastTs, await toSlackReply(config.botToken, editContent));
             debugLog(`Edited last bot message: ${lastTs}`);
           } else {
             const botMessages = await fetchBotMessages(config.botToken, channelId, replyThreadTs);
             if (botMessages.length > 0) {
-              await updateMessage(config.botToken, channelId, botMessages[0].ts, editContent);
+              await updateMessage(config.botToken, channelId, botMessages[0].ts, await toSlackReply(config.botToken, editContent));
               debugLog(`Edited bot message (from history): ${botMessages[0].ts}`);
             }
           }
@@ -1727,7 +1763,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
           if (followUpResult.exitCode === 0 && followUpResult.stdout) {
             const { cleanedText: followUpText } = extractReactionDirective(followUpResult.stdout);
             if (followUpText.trim()) {
-              const ts = await postMessage(config.botToken, channelId, followUpText, replyThreadTs);
+              const ts = await postMessage(config.botToken, channelId, await toSlackReply(config.botToken, followUpText), replyThreadTs);
               if (ts) lastBotMessageTs.set(msgKey, ts);
             }
           }
@@ -1910,7 +1946,8 @@ async function handleBlockAction(payload: any): Promise<void> {
 
     if (result.exitCode === 0 && result.stdout) {
       const { cleanedText } = extractReactionDirective(result.stdout);
-      const { cleanedText: finalText, buttons, select } = extractBlockKitDirectives(cleanedText);
+      const { cleanedText: blockText, buttons, select } = extractBlockKitDirectives(cleanedText);
+      const finalText = await toSlackReply(config.botToken, blockText);
 
       if (finalText) {
         const msgKey = botMessageKey(channelId, replyThreadTs);

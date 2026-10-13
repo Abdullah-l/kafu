@@ -8,6 +8,7 @@ import {
   parseSlackLinks,
   formatElapsed,
   runStatusLine,
+  markdownToMrkdwn,
 } from "../commands/slack";
 
 describe("assistantKey", () => {
@@ -108,5 +109,29 @@ describe("runStatusLine", () => {
   test("formats elapsed time", () => {
     expect(formatElapsed(0)).toBe("0s");
     expect(formatElapsed(605_000)).toBe("10m 05s");
+  });
+});
+
+describe("markdownToMrkdwn", () => {
+  test("converts bold, headings, links and bullets", () => {
+    const md = "## Access\n- **Linear**: read and write\n* **GitHub**: see [docs](https://example.com/a)";
+    expect(markdownToMrkdwn(md)).toBe("*Access*\n• *Linear*: read and write\n• *GitHub*: see <https://example.com/a|docs>");
+  });
+
+  test("converts single-star italics and strikethrough", () => {
+    expect(markdownToMrkdwn("this is *really* ~~old~~")).toBe("this is _really_ ~old~");
+  });
+
+  test("bold heading does not double up", () => {
+    expect(markdownToMrkdwn("# **Title**")).toBe("*Title*");
+  });
+
+  test("leaves code untouched", () => {
+    const md = "run `a **b** c` then\n```\n# not a heading\n**x**\n```";
+    expect(markdownToMrkdwn(md)).toBe(md);
+  });
+
+  test("leaves identifiers and Slack syntax alone", () => {
+    expect(markdownToMrkdwn("__init__ and 2*3*4 and <@U123ABC> *done*")).toBe("__init__ and 2*3*4 and <@U123ABC> _done_");
   });
 });
