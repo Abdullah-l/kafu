@@ -200,6 +200,13 @@ async function slackApi<T = Record<string, unknown>>(
   return data;
 }
 
+async function slackGet<T = Record<string, unknown>>(token: string, method: string, params: Record<string, string>): Promise<T> {
+  const res = await fetch(`${SLACK_API}/${method}?${new URLSearchParams(params)}`, { headers: { Authorization: `Bearer ${token}` } });
+  const data = (await res.json()) as { ok: boolean; error?: string } & T;
+  if (!data.ok) throw new Error(`Slack API ${method} error: ${data.error ?? "unknown"}`);
+  return data;
+}
+
 async function setAssistantStatus(
   token: string,
   channelId: string,
@@ -673,6 +680,67 @@ function formatThreadHistoryAsContext(
   return lines.join("\n");
 }
 
+const SLACK_LINK_RE = /https:\/\/[a-z0-9-]+\.slack\.com\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})([^\s|>]*)/g;
+const LINKED_THREAD_LIMIT = 3;
+const LINKED_MESSAGE_LIMIT = 50;
+const LINKED_TEXT_LIMIT = 20_000;
+const LINKED_IMAGE_LIMIT = 4;
+
+export function parseSlackLinks(text: string): { url: string; channelId: string; ts: string; threadTs: string }[] {
+  const out: { url: string; channelId: string; ts: string; threadTs: string }[] = [];
+  for (const m of text.matchAll(SLACK_LINK_RE)) {
+    const ts = `${m[2]}.${m[3]}`;
+    const threadTs = m[4].match(/[?&]thread_ts=(\d+\.\d+)/)?.[1] ?? ts;
+    if (out.some((l) => l.channelId === m[1] && l.threadTs === threadTs)) continue;
+    out.push({ url: m[0], channelId: m[1], ts, threadTs });
+    if (out.length >= LINKED_THREAD_LIMIT) break;
+  }
+  return out;
+}
+
+export async function fetchLinkedThreads(
+  token: string,
+  text: string,
+  current: { channelId: string; threadTs: string },
+): Promise<{ context: string; images: { path: string; user?: string }[] }> {
+  const parts: string[] = [];
+  const images: { path: string; user?: string }[] = [];
+  let budget = LINKED_TEXT_LIMIT;
+  for (const link of parseSlackLinks(text)) {
+    if (link.channelId === current.channelId && link.threadTs === current.threadTs) continue;
+    try {
+      const messages = await fetchThreadHistory(token, link.channelId, link.threadTs, LINKED_MESSAGE_LIMIT);
+      const lines = [`<untrusted-slack-thread link="${link.url}" channel="${link.channelId}">`];
+      for (const msg of messages) {
+        const when = new Date(Number(msg.ts) * 1000).toISOString().slice(0, 16).replace("T", " ");
+        const sender = msg.role === "assistant" ? "Bot" : `<@${msg.user ?? "unknown"}>`;
+        const marker = msg.ts === link.ts && link.ts !== link.threadTs ? " (the linked message)" : "";
+        const body = sanitizeUserInput(msg.text ?? "").replace(/<\/?untrusted-[^>]*>/gi, "").slice(0, 2000);
+        const fileNote = msg.files?.length ? ` [files: ${msg.files.map((f) => f.name ?? "file").join(", ")}]` : "";
+        const line = `[${sender} ${when} UTC${marker}]: ${body}${fileNote}`;
+        if (budget - line.length < 0) { lines.push("[…thread truncated]"); break; }
+        budget -= line.length;
+        lines.push(line);
+        for (const file of (msg.files ?? []).filter(isImageFile)) {
+          if (images.length >= LINKED_IMAGE_LIMIT) break;
+          const path = await downloadSlackFile(token, file, "image").catch(() => null);
+          if (path) images.push({ path, user: msg.user });
+        }
+      }
+      lines.push("</untrusted-slack-thread>");
+      parts.push(lines.join("\n"));
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      parts.push(`Slack link ${link.url} could not be read (${reason}). The bot is probably not in that channel; ask the user to invite it there or paste the messages.`);
+    }
+  }
+  if (parts.length === 0) return { context: "", images };
+  return {
+    context: ["The user linked these Slack threads. kafu fetched them for you; this is how you read Slack links.", ...parts].join("\n"),
+    images,
+  };
+}
+
 function slackThreadId(channelId: string, threadTs: string): string {
   return `slk:${channelId}:${threadTs}`;
 }
@@ -917,8 +985,8 @@ function accountIO(token: string, userId: string, channelId: string, threadTs: s
 
 async function slackLink(token: string, channelId: string, ts: string): Promise<{ permalink: string; channelName: string }> {
   const [link, info] = await Promise.all([
-    slackApi<{ permalink: string }>(token, "chat.getPermalink", { channel: channelId, message_ts: ts }).catch(() => null),
-    slackApi<{ channel: { name?: string; is_im?: boolean } }>(token, "conversations.info", { channel: channelId }).catch(() => null),
+    slackGet<{ permalink: string }>(token, "chat.getPermalink", { channel: channelId, message_ts: ts }).catch(() => null),
+    slackGet<{ channel: { name?: string; is_im?: boolean } }>(token, "conversations.info", { channel: channelId }).catch(() => null),
   ]);
   const channel = info?.channel;
   return { permalink: link?.permalink ?? "", channelName: channel?.is_im ? "Direct message" : channel?.name ? `#${channel.name}` : "" };
@@ -1136,6 +1204,13 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       seenThreadImages.set(sessionThreadId, seen);
     }
 
+    let linkedThreads: { context: string; images: { path: string; user?: string }[] } = { context: "", images: [] };
+    try {
+      linkedThreads = await fetchLinkedThreads(config.botToken, cleanText, { channelId, threadTs: replyThreadTs });
+    } catch (err) {
+      debugLog(`Failed to fetch linked Slack threads: ${err instanceof Error ? err.message : err}`);
+    }
+
     let imagePath: string | null = null;
     let voicePath: string | null = null;
     let voiceTranscript: string | null = null;
@@ -1207,6 +1282,12 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     }
     if (threadHistoryContext) {
       promptParts.push(threadHistoryContext);
+    }
+    if (linkedThreads.context) {
+      promptParts.push(linkedThreads.context);
+      for (const img of linkedThreads.images) {
+        promptParts.push(`Image from a linked Slack thread${img.user ? ` (posted by <@${img.user}>)` : ""}: ${img.path}`);
+      }
     }
     if (skillContext) {
       const args = cleanText.trim().slice(command!.length).trim();
@@ -1298,7 +1379,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
         onToolEvent,
         cancelKey,
         identity,
-        attachmentPaths: [imagePath, ...earlierImages.map((i) => i.path), ...docPaths.map((d) => d.path)].filter((p): p is string => !!p),
+        attachmentPaths: [imagePath, ...earlierImages.map((i) => i.path), ...linkedThreads.images.map((i) => i.path), ...docPaths.map((d) => d.path)].filter((p): p is string => !!p),
       });
     } finally {
       clearInterval(statusRefreshInterval);
