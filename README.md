@@ -62,7 +62,7 @@ Allowlists are fail-closed: an empty `allowedUserIds` blocks everyone. See `comm
 ### Slack app
 
 1. Create an app at [api.slack.com/apps](https://api.slack.com/apps) and enable **Socket Mode** (gives the `xapp-` token).
-2. Bot scopes: `app_mentions:read`, `chat:write`, `channels:history`, `groups:history`, `im:history`, `im:write`, `reactions:write`, `files:read`, `files:write`.
+2. Bot scopes: `app_mentions:read`, `chat:write`, `channels:history`, `groups:history`, `im:history`, `mpim:history`, `im:write`, `reactions:write`, `files:read`, `files:write`. To read Slack links people share (names, private-channel membership checks, joining public channels on demand) also add `channels:read`, `groups:read`, `im:read`, `mpim:read`, `users:read`, `channels:join`.
 3. Events: `app_mention`, `message.im`, `message.channels`, `message.groups`. Enable **Interactivity** for the Stop button.
 4. Install to the workspace and copy the `xoxb-` bot token.
 
