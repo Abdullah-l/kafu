@@ -11,9 +11,15 @@ import {
   changeModel,
 } from "../accounts";
 import { createLinkToken, redeemLinkToken, createSessionToken, sessionUser, SESSION_MAX_AGE_SECONDS } from "./auth";
+import { listConversations, getConversation, deleteConversation, deleteAllConversations, getAssistantName } from "../conversations";
 import { agentWebSocket, authenticateAgent, pairDevice, type AgentSocketData } from "../agent/relay";
 
 const PAGE_FILE = join(import.meta.dir, "page.html");
+const CONVERSATIONS_FILE = join(import.meta.dir, "conversations.html");
+const ASSETS: Record<string, { file: string; type: string }> = {
+  "/portal.css": { file: join(import.meta.dir, "portal.css"), type: "text/css; charset=utf-8" },
+  "/portal.js": { file: join(import.meta.dir, "portal.js"), type: "text/javascript; charset=utf-8" },
+};
 const COOKIE = "kafu_portal";
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -89,6 +95,17 @@ async function handle(req: Request, srv: ReturnType<typeof Bun.serve<AgentSocket
 
   if (url.pathname === "/" ) return Response.redirect(`${url.origin}/connect`, 302);
 
+  const asset = ASSETS[url.pathname];
+  if (asset && req.method === "GET") {
+    return new Response(Bun.file(asset.file), { headers: { ...SECURITY_HEADERS, "Content-Type": asset.type } });
+  }
+
+  if (url.pathname === "/conversations" && req.method === "GET") {
+    if (!(await sessionUser(cookieValue(req)))) return html(expiredPage(title), 401);
+    const page = (await Bun.file(CONVERSATIONS_FILE).text()).replaceAll("{{ASSISTANT}}", escapeHtml(getAssistantName() || "the bot"));
+    return html(page);
+  }
+
   if (url.pathname === "/connect" && req.method === "GET") {
     const linkToken = url.searchParams.get("t");
     if (linkToken) {
@@ -138,6 +155,15 @@ async function handle(req: Request, srv: ReturnType<typeof Bun.serve<AgentSocket
       const body = await readJson(req);
       return json(await changeModel(userId, String(body.model ?? "")));
     }
+
+    if (url.pathname === "/api/conversations" && req.method === "GET") return json({ conversations: await listConversations(userId) });
+    if (url.pathname === "/api/conversations/delete-all" && req.method === "POST") return json({ ok: true, deleted: await deleteAllConversations(userId) });
+    const conversation = url.pathname.match(/^\/api\/conversations\/([A-Za-z0-9_-]{1,160})(\/delete)?$/);
+    if (conversation && !conversation[2] && req.method === "GET") {
+      const found = await getConversation(userId, conversation[1]);
+      return found ? json({ conversation: found }) : json({ error: "Not found" }, 404);
+    }
+    if (conversation && conversation[2] && req.method === "POST") return json({ ok: await deleteConversation(userId, conversation[1]) });
 
     const service = url.pathname.match(/^\/api\/services\/([a-z0-9_-]+)\/(secret|device|disconnect)$/);
     if (service && req.method === "POST") {

@@ -51,6 +51,10 @@ export function disconnectAgents(userId: string): void {
   for (const socket of sockets.get(userId) ?? []) socket.close(4001, "Unpaired");
 }
 
+export function forgetOnAgents(userId: string, sessionKey: string): void {
+  for (const socket of sockets.get(userId) ?? []) send(socket, { type: "forget", sessionKey });
+}
+
 export async function pairDevice(code: string, name: string): Promise<{ token: string; userId: string } | null> {
   const userId = await redeemPairCode(code);
   if (!userId) return null;

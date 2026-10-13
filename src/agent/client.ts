@@ -3,6 +3,7 @@ import { join, basename } from "node:path";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename, rm, chmod } from "node:fs/promises";
 import { CLAUDE_EXECUTABLE, runClaudeStream, killRun } from "../runner";
+import { findSessionJsonlPath } from "../sessionFiles";
 import { AGENT_PROTOCOL_VERSION, type AgentMessage, type RunRequest, type ServerMessage } from "./protocol";
 
 const HOME = process.env.KAFU_AGENT_HOME || join(homedir(), ".kafu");
@@ -124,6 +125,15 @@ async function execute(config: AgentConfig, request: RunRequest, emit: (message:
   emit({ type: "result", id: request.id, stdout: result.rawStdout, stderr: result.stderr, exitCode: result.exitCode });
 }
 
+async function forgetSession(sessionKey: string): Promise<void> {
+  const sessionId = (await sessions())[sessionKey];
+  if (!sessionId) return;
+  await rememberSession(sessionKey, null);
+  const transcript = findSessionJsonlPath(sessionId);
+  if (transcript) await rm(transcript, { force: true });
+  console.log(`[${new Date().toLocaleTimeString()}] Deleted a conversation from this computer.`);
+}
+
 export async function agentPair(args: string[]): Promise<void> {
   const [server, code] = args;
   if (!server || !code) {
@@ -218,6 +228,10 @@ export async function runAgent(): Promise<void> {
         console.log(`[${new Date().toLocaleTimeString()}] Connected to ${config.server} as ${message.userId}. Waiting for requests from Slack.`);
       } else if (message.type === "cancel") {
         if (running.has(message.id)) killRun(message.id);
+      } else if (message.type === "forget") {
+        const key = message.sessionKey;
+        const previous = queues.get(key) ?? Promise.resolve();
+        queues.set(key, previous.then(() => forgetSession(key)).catch(() => {}));
       } else if (message.type === "run") {
         const request = message;
         console.log(`[${new Date().toLocaleTimeString()}] Request ${request.id}: ${request.prompt.split("\n").find((l) => l.startsWith("Message:"))?.slice(9, 90) ?? "(no text)"}`);

@@ -261,3 +261,70 @@ describe("local agent pairing", () => {
     }
   });
 });
+
+describe("conversations", () => {
+  let dir: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "kafu-convos-"));
+  });
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("records turns per thread and deletes everything kept for it", async () => {
+    const out = await runInDir(dir, `
+      const fs = await import("node:fs");
+      const c = await import(${JSON.stringify(join(SRC, "conversations.ts"))});
+      const s = await import(${JSON.stringify(join(SRC, "sessionManager.ts"))});
+      const sid = "11111111-2222-3333-4444-555555555555";
+      const base = { channelId: "C1", threadTs: "1700000000.000100", mode: "server", status: "ok" };
+      let lookups = 0;
+      const resolveLink = async () => { lookups++; return { permalink: "https://x.slack.com/archives/C1/p1700000000000100", channelName: "#eng" }; };
+      await c.recordTurn("U1", { ...base, message: "first question", reply: "first answer", resolveLink });
+      await c.recordTurn("U1", { ...base, message: "follow up", reply: "second answer", resolveLink });
+      await c.recordTurn("U1", { ...base, threadTs: "1700000001.000100", message: "other thread", reply: "x", status: "error" });
+      await c.recordTurn("U2", { ...base, message: "not yours", reply: "y" });
+      await s.createThreadSession("slk:C1:1700000000.000100:U1", sid);
+      const project = ".claude/kafu/users/U1/claude/projects/p";
+      fs.mkdirSync(project, { recursive: true });
+      fs.writeFileSync(project + "/" + sid + ".jsonl", "{}");
+      fs.mkdirSync(".claude/kafu/logs", { recursive: true });
+      fs.writeFileSync(".claude/kafu/logs/slack-U1-a.log", "Session: " + sid + " (new)");
+      fs.writeFileSync(".claude/kafu/logs/slack-U1-b.log", "Session: other");
+      const list = await c.listConversations("U1");
+      const id = c.conversationId("C1", "1700000000.000100");
+      const full = await c.getConversation("U1", id);
+      const deleted = await c.deleteConversation("U1", id);
+      console.log(JSON.stringify({
+        count: list.length,
+        lookups,
+        title: full.title,
+        permalink: full.permalink,
+        turns: full.turns.map((t) => t.reply),
+        deleted,
+        remaining: (await c.listConversations("U1")).map((x) => x.title),
+        other: (await c.listConversations("U2")).length,
+        session: await s.peekThreadSession("slk:C1:1700000000.000100:U1"),
+        transcript: fs.existsSync(project + "/" + sid + ".jsonl"),
+        logs: fs.readdirSync(".claude/kafu/logs"),
+        badId: await c.getConversation("U1", "../../user").catch(() => "rejected"),
+      }));
+    `);
+    expect(JSON.parse(out)).toEqual({
+      count: 2,
+      lookups: 1,
+      title: "first question",
+      permalink: "https://x.slack.com/archives/C1/p1700000000000100",
+      turns: ["first answer", "second answer"],
+      deleted: true,
+      remaining: ["other thread"],
+      other: 1,
+      session: null,
+      transcript: false,
+      logs: ["slack-U1-b.log"],
+      badId: null,
+    });
+  });
+});
