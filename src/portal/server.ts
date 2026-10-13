@@ -58,7 +58,7 @@ function escapeHtml(text: string): string {
 
 function expiredPage(title: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;font:16px/1.5 system-ui,sans-serif;background:#f6f7f9;color:#1c2330}@media(prefers-color-scheme:dark){body{background:#12151b;color:#e6e9ef}}main{max-width:420px;padding:24px;text-align:center}h1{font-size:20px;margin:0 0 8px}p{margin:0;opacity:.75}</style></head>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f2f4f3;color:#18212b}@media(prefers-color-scheme:dark){body{background:#10151a;color:#e4e9ee}}main{max-width:420px;padding:24px}h1{font-size:24px;font-weight:750;letter-spacing:-0.02em;margin:0 0 8px}p{margin:0;opacity:.72}</style></head>
 <body><main><h1>This link has expired</h1><p>Ask for a new one in Slack: mention the bot with <code>connect</code>.</p></main></body></html>`;
 }
 

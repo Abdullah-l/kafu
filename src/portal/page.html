@@ -6,77 +6,118 @@
 <title>{{TITLE}}</title>
 <style>
 :root {
-  --bg: #f6f7f9; --card: #ffffff; --text: #1c2330; --muted: #5f6b7a; --line: #e3e7ed;
-  --accent: #2f5bd3; --accent-text: #ffffff; --ok: #1f8a4c; --ok-bg: #e5f5ec; --warn: #9a6100; --warn-bg: #fdf1dc;
-  --err: #b42318; --err-bg: #fde8e7; --code-bg: #f0f2f6;
+  --paper: #f2f4f3; --panel: #ffffff; --ink: #18212b; --muted: #5c6873; --line: #d6dcd9;
+  --accent: #2b4fd8; --accent-ink: #ffffff; --signal: #1e7a5a; --signal-soft: #e1f1ea;
+  --pending: #a8650f; --pending-soft: #fbefd9; --err: #b42318; --err-soft: #fde8e7; --well: #e9edeb;
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #12151b; --card: #1a1f27; --text: #e6e9ef; --muted: #9aa4b2; --line: #2a313c;
-    --accent: #6b8cff; --accent-text: #0d1220; --ok: #5fd08f; --ok-bg: #173325; --warn: #f0b75a; --warn-bg: #3a2c12;
-    --err: #ff8a80; --err-bg: #3d1a18; --code-bg: #232a35;
+    --paper: #10151a; --panel: #171e25; --ink: #e4e9ee; --muted: #93a0ad; --line: #2a333c;
+    --accent: #8ea4ff; --accent-ink: #0e1430; --signal: #4fd1a1; --signal-soft: #15342a;
+    --pending: #f0b75a; --pending-soft: #3a2c12; --err: #ff8a80; --err-soft: #3d1a18; --well: #1f2730;
+    color-scheme: dark;
   }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { max-width: 640px; margin: 0 auto; padding: 40px 16px 64px; }
-header { margin-bottom: 24px; }
-h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.01em; }
-header p { margin: 0; color: var(--muted); }
-.progress { margin-top: 14px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
-.progress div { height: 100%; background: var(--ok); width: 0; transition: width .3s; }
-.progress-label { margin-top: 6px; font-size: 13px; color: var(--muted); }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px; }
-.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.name { font-weight: 600; font-size: 16px; }
-.sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
-.pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
-.pill.ok { color: var(--ok); background: var(--ok-bg); }
-.pill.off { color: var(--muted); background: var(--code-bg); }
-.pill.wait { color: var(--warn); background: var(--warn-bg); }
-.pill.err { color: var(--err); background: var(--err-bg); }
-.body { margin-top: 14px; display: grid; gap: 10px; }
-.help { color: var(--muted); font-size: 13px; }
-button, .button { font: inherit; font-weight: 600; font-size: 14px; border: 1px solid transparent; border-radius: 8px; padding: 8px 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-button.primary, .button.primary { background: var(--accent); color: var(--accent-text); }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 620px; margin: 0 auto; padding: 48px 20px 72px; }
+header { margin-bottom: 36px; }
+h1 { font-size: 30px; line-height: 1.15; font-weight: 750; letter-spacing: -0.025em; margin: 0 0 8px; }
+header p { margin: 0; color: var(--muted); max-width: 52ch; }
+.tally { margin-top: 18px; display: flex; align-items: baseline; gap: 10px; font-size: 14px; color: var(--muted); }
+.tally strong { font-size: 22px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.tally.all strong { color: var(--signal); }
+ol.rail { list-style: none; margin: 0; padding: 0; }
+.stop { position: relative; padding: 0 0 28px 40px; }
+.stop::before { content: ""; position: absolute; left: 9px; top: 22px; bottom: -2px; width: 2px; background: var(--line); }
+.stop:last-child::before { display: none; }
+.stop.on::before { background: var(--signal); }
+.node { position: absolute; left: 0; top: 3px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--line); background: var(--paper); display: grid; place-items: center; }
+.stop.on .node { border-color: var(--signal); background: var(--signal); }
+.stop.on .node::after { content: ""; width: 5px; height: 9px; border: solid var(--paper); border-width: 0 2px 2px 0; transform: translate(0, -1px) rotate(45deg); }
+.stop.wait .node { border-color: var(--pending); }
+.stop.wait .node::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--pending); animation: pulse 1.4s ease-in-out infinite; }
+.stop.bad .node { border-color: var(--err); }
+@keyframes pulse { 50% { opacity: .3; } }
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.name { font-weight: 650; font-size: 17px; letter-spacing: -0.01em; }
+.tag { font-size: 12px; font-weight: 600; color: var(--muted); margin-left: 8px; }
+.state { font-size: 13px; font-weight: 600; white-space: nowrap; color: var(--muted); }
+.state.ok { color: var(--signal); }
+.state.wait { color: var(--pending); }
+.state.err { color: var(--err); }
+.sub { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+.body { margin-top: 12px; display: grid; gap: 12px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; }
+.help { color: var(--muted); font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.help a, a.inline-link { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.help a:hover, a.inline-link:hover { text-decoration-thickness: 2px; }
+ol.steps { margin: 0; padding-left: 20px; color: var(--muted); font-size: 13.5px; display: grid; gap: 4px; }
+button, .button { font: inherit; font-weight: 600; font-size: 14px; border: 1px solid transparent; border-radius: 8px; padding: 8px 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: filter .15s, background .15s; }
+button.primary, .button.primary { background: var(--accent); color: var(--accent-ink); }
+button.primary:hover, .button.primary:hover { filter: brightness(1.08); }
 button.ghost { background: transparent; color: var(--muted); border-color: var(--line); }
+button.ghost:hover { color: var(--ink); border-color: var(--muted); }
+button.danger:hover { color: var(--err); border-color: var(--err); }
 button:disabled { opacity: .55; cursor: default; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; }
-input, select { font: inherit; width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+input, select { font: inherit; width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+input:focus, select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 .inline { display: flex; gap: 8px; }
-.inline input { flex: 1; }
-.code { font: 600 26px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; background: var(--code-bg); border-radius: 8px; padding: 14px; text-align: center; }
-.error { color: var(--err); font-size: 13px; }
-.link { color: var(--accent); background: none; border: 0; padding: 0; font-weight: 500; font-size: 13px; cursor: pointer; justify-self: start; }
-.help a { color: var(--accent); }
-footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: center; }
+.inline input { flex: 1; min-width: 0; }
+.field { display: grid; gap: 6px; }
+.field label { font-size: 13px; font-weight: 600; }
+.code { font: 600 28px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .14em; background: var(--well); border-radius: 8px; padding: 16px; text-align: center; user-select: all; }
+.error { color: var(--err); background: var(--err-soft); border-radius: 8px; padding: 8px 12px; font-size: 13.5px; }
+.link { color: var(--accent); background: none; border: 0; padding: 0; font-weight: 500; font-size: 13.5px; cursor: pointer; justify-self: start; text-decoration: underline; text-underline-offset: 2px; }
+.connected-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+footer { margin-top: 12px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+.expired { padding-top: 20vh; }
+@media (max-width: 480px) {
+  main { padding-top: 32px; }
+  h1 { font-size: 25px; }
+  .inline { flex-direction: column; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
 </style>
 </head>
 <body>
 <main>
   <header>
     <h1>{{TITLE}}</h1>
-    <p>Connect your own accounts. Everything is stored encrypted and only used for your requests.</p>
-    <div class="progress"><div id="bar"></div></div>
-    <div class="progress-label" id="progress-label"></div>
+    <p>Connect your own accounts. Tokens are stored encrypted and only used for your requests.</p>
+    <div class="tally" id="tally"></div>
   </header>
-  <section id="cards"></section>
-  <footer>Signed in from Slack. This page only shows your own connections.</footer>
+  <ol class="rail" id="cards"></ol>
+  <footer>Signed in from Slack. This page only shows your own connections. Need a fresh link? Mention the bot with <code>connect</code>.</footer>
 </main>
 <script>
 (function () {
   var state = null;
   var ui = {};
   var pollTimer = null;
+  var LINK = /(https?:\/\/[^\s<>"'`]+|\b(?:[a-z0-9-]+\.)+(?:com|io|net|org|dev|app|ai|sa|co)\b(?:\/[^\s<>"'`]*)?)/gi;
 
   function api(path, body) {
     var opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "x-kafu": "1" }, body: JSON.stringify(body) };
     return fetch(path, opts).then(function (r) {
       return r.json().then(function (data) {
-        if (r.status === 401) { document.body.innerHTML = "<main><h1>Session expired</h1><p>Ask for a new link in Slack.</p></main>"; throw new Error("expired"); }
+        if (r.status === 401) { showExpired(); throw new Error("expired"); }
         return data;
       });
     });
+  }
+
+  function showExpired() {
+    var main = document.querySelector("main");
+    main.innerHTML = "";
+    main.className = "expired";
+    main.appendChild(el("h1", { text: "Your session expired" }));
+    main.appendChild(el("p", { class: "help", text: "Ask for a new link in Slack: mention the bot with connect." }));
   }
 
   function el(tag, attrs, children) {
@@ -85,11 +126,37 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
       if (k === "text") node.textContent = attrs[k];
       else if (k === "onclick") node.addEventListener("click", attrs[k]);
       else if (k === "oninput") node.addEventListener("input", attrs[k]);
+      else if (k === "onenter") node.addEventListener("keydown", function (e) { if (e.key === "Enter") attrs[k](e); });
       else if (k === "value") node.value = attrs[k];
       else if (attrs[k] === null || attrs[k] === undefined) return;
       else node.setAttribute(k, attrs[k]);
     });
-    (children || []).forEach(function (c) { if (c) node.appendChild(c); });
+    (children || []).forEach(function (c) { if (c) node.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return node;
+  }
+
+  function anchor(href, text, cls) {
+    return el("a", { class: cls || "inline-link", href: href, target: "_blank", rel: "noopener noreferrer", text: text });
+  }
+
+  function linkify(text) {
+    var frag = document.createDocumentFragment();
+    var last = 0;
+    text.replace(LINK, function (match, _g, offset) {
+      var url = match.replace(/[.,;:!?)\]]+$/, "");
+      if (offset > last) frag.appendChild(document.createTextNode(text.slice(last, offset)));
+      var href = /^https?:\/\//i.test(url) ? url : "https://" + url;
+      frag.appendChild(anchor(href, url.replace(/^https?:\/\//i, "")));
+      last = offset + url.length;
+      return match;
+    });
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    return frag;
+  }
+
+  function helpText(text) {
+    var node = el("div", { class: "help" });
+    node.appendChild(linkify(text));
     return node;
   }
 
@@ -115,17 +182,6 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
     document.body.removeChild(area);
   }
 
-  function pill(kind, text) { return el("span", { class: "pill " + kind, text: text }); }
-
-  function helpText(text) {
-    var node = el("div", { class: "help" });
-    text.split(/(https:\/\/[^\s]+)/).forEach(function (part, i) {
-      if (i % 2 === 1) node.appendChild(el("a", { href: part, target: "_blank", rel: "noopener", text: part.replace(/^https:\/\//, "") }));
-      else if (part) node.appendChild(document.createTextNode(part));
-    });
-    return node;
-  }
-
   function refresh() {
     return api("/api/status").then(function (s) { state = s; render(); schedulePoll(); });
   }
@@ -138,24 +194,45 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
 
   function setUi(id, patch) { ui[id] = Object.assign({}, ui[id] || {}, patch); render(); }
 
-  function claudeCard() {
+  function stop(kind, name, tag, stateLabel, sub, body) {
+    var stateClass = { on: "ok", wait: "wait", bad: "err" }[kind] || "";
+    return el("li", { class: "stop " + kind }, [
+      el("span", { class: "node", "aria-hidden": "true" }),
+      el("div", { class: "head" }, [
+        el("div", {}, [el("span", { class: "name", text: name }), tag ? el("span", { class: "tag", text: tag }) : null]),
+        el("span", { class: "state " + stateClass, text: stateLabel }),
+      ]),
+      sub ? el("div", { class: "sub", text: sub }) : null,
+      body.length ? el("div", { class: "body" }, body) : null,
+    ]);
+  }
+
+  function claudeStop() {
     var c = state.claude;
     var u = ui.claude || {};
     var body = [];
+    var waiting = !c.connected && (u.url || c.signInUrl);
     if (!c.connected) {
-      if (!u.url && !c.signInUrl) {
-        body.push(el("div", { class: "help", text: "Use your own Claude Pro, Max, Team or Enterprise account." }));
-        body.push(el("div", { class: "actions" }, [el("button", { class: "primary", text: u.busy ? "Starting…" : "Sign in with Claude", onclick: startClaude })]));
+      if (!waiting) {
+        body.push(el("div", { class: "panel" }, [
+          el("div", { class: "help", text: "Use your own Claude Pro, Max, Team or Enterprise account." }),
+          el("div", { class: "actions" }, [el("button", { class: "primary", text: u.busy ? "Starting…" : "Sign in with Claude", onclick: startClaude })]),
+        ]));
       } else {
         var url = u.url || c.signInUrl;
-        body.push(el("div", { class: "help", text: "1. Open the sign-in page and approve. 2. Paste the code Claude shows you." }));
-        body.push(el("div", { class: "actions" }, [el("a", { class: "button primary", href: url, target: "_blank", rel: "noopener", text: "Open Claude sign-in" })]));
-        var input = el("input", { id: "claude-code", placeholder: "Paste the code here", autocomplete: "off", value: u.draft || "", oninput: function (e) { (ui.claude = ui.claude || {}).draft = e.target.value; } });
-        body.push(el("div", { class: "inline" }, [input, el("button", { class: "primary", text: u.busy ? "Checking…" : "Connect", onclick: function () { finishClaude(input.value); } })]));
-        body.push(el("button", { class: "link", text: "Get a new sign-in link", onclick: function () { startClaude(true); } }));
+        var input = el("input", { id: "claude-code", placeholder: "Paste the code here", autocomplete: "off", "aria-label": "Claude sign-in code", value: u.draft || "", oninput: function (e) { (ui.claude = ui.claude || {}).draft = e.target.value; }, onenter: function () { finishClaude(input.value); } });
+        body.push(el("div", { class: "panel" }, [
+          el("ol", { class: "steps" }, [
+            el("li", {}, ["Open the ", anchor(url, "Claude sign-in page"), " and approve."]),
+            el("li", { text: "Paste the code Claude shows you below." }),
+          ]),
+          el("div", { class: "actions" }, [anchor(url, "Open Claude sign-in", "button primary")]),
+          el("div", { class: "inline" }, [input, el("button", { class: "primary", text: u.busy ? "Checking…" : "Connect", onclick: function () { finishClaude(input.value); } })]),
+          el("button", { class: "link", text: "Get a new sign-in link", onclick: function () { startClaude(true); } }),
+        ]));
       }
     } else {
-      var select = el("select", {});
+      var select = el("select", { id: "model" });
       select.appendChild(el("option", { value: "", text: "Default (" + state.defaultModel + ")" }));
       state.models.forEach(function (m) {
         var opt = el("option", { value: m.id, text: m.label + " — " + m.description.toLowerCase() });
@@ -163,64 +240,80 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
         select.appendChild(opt);
       });
       select.addEventListener("change", function () { api("/api/model", { model: select.value }).then(refresh); });
-      body.push(el("label", { class: "help", text: "Model" }));
-      body.push(select);
-      body.push(el("div", { class: "actions" }, [el("button", { class: "ghost", text: "Disconnect", onclick: function () { if (confirm("Disconnect your Claude account?")) api("/api/claude/logout", {}).then(refresh); } })]));
+      body.push(el("div", { class: "panel" }, [
+        el("div", { class: "field" }, [el("label", { for: "model", text: "Model" }), select]),
+        el("div", { class: "actions" }, [el("button", { class: "ghost danger", text: "Disconnect", onclick: function () { if (confirm("Disconnect your Claude account?")) api("/api/claude/logout", {}).then(refresh); } })]),
+      ]));
     }
     if (u.error) body.push(el("div", { class: "error", text: u.error }));
-    return el("div", { class: "card" }, [
-      el("div", { class: "row" }, [
-        el("div", {}, [el("div", { class: "name", text: "Claude" }), el("div", { class: "sub", text: c.connected ? "Model: " + c.modelLabel : "Required for everything else" })]),
-        c.connected ? pill("ok", "Connected") : pill(c.signInUrl || u.url ? "wait" : "off", c.signInUrl || u.url ? "Waiting for code" : "Not connected"),
-      ]),
-      el("div", { class: "body" }, body),
-    ]);
+    return stop(
+      c.connected ? "on" : waiting ? "wait" : "",
+      "Claude", "Required",
+      c.connected ? "Connected" : waiting ? "Waiting for code" : "Not connected",
+      c.connected ? null : "Everything else runs on this account.",
+      body
+    );
   }
 
-  function serviceCard(s) {
+  function serviceStop(s) {
     var u = ui[s.id] || {};
     var body = [];
-    var status;
+    var kind = "";
+    var label = "Not connected";
     if (s.connected) {
-      status = pill("ok", "Connected");
-      body.push(el("div", { class: "actions" }, [el("button", { class: "ghost", text: "Disconnect", onclick: function () { if (confirm("Disconnect " + s.label + "?")) api("/api/services/" + s.id + "/disconnect", {}).then(refresh); } })]));
+      kind = "on";
+      label = "Connected";
+      body.push(el("div", { class: "actions" }, [el("button", { class: "ghost danger", text: "Disconnect", onclick: function () { if (confirm("Disconnect " + s.label + "?")) api("/api/services/" + s.id + "/disconnect", {}).then(refresh); } })]));
     } else if (s.device && s.device.status === "pending") {
-      status = pill("wait", "Waiting for approval");
-      body.push(el("div", { class: "help", text: "Open GitHub, enter this code and approve. This page updates by itself." }));
-      body.push(el("div", { class: "code", text: s.device.code }));
-      body.push(el("div", { class: "actions" }, [
-        el("a", { class: "button primary", href: s.device.url, target: "_blank", rel: "noopener", text: "Open GitHub" }),
-        el("button", { class: "ghost", text: "Copy code", onclick: function (e) { copyText(s.device.code, e.target); } }),
+      kind = "wait";
+      label = "Waiting for approval";
+      body.push(el("div", { class: "panel" }, [
+        el("ol", { class: "steps" }, [
+          el("li", {}, ["Open ", anchor(s.device.url, s.device.url.replace(/^https?:\/\//i, "")), "."]),
+          el("li", { text: "Enter this code and approve. This page updates by itself." }),
+        ]),
+        el("div", { class: "code", text: s.device.code }),
+        el("div", { class: "actions" }, [
+          anchor(s.device.url, "Open " + s.label, "button primary"),
+          el("button", { class: "ghost", text: "Copy code", onclick: function (e) { copyText(s.device.code, e.target); } }),
+        ]),
       ]));
     } else {
-      status = s.device && s.device.status === "error" ? pill("err", "Sign-in failed") : pill("off", "Not connected");
+      if (s.device && s.device.status === "error") { kind = "bad"; label = "Sign-in failed"; }
       if (s.method === "github" && !u.paste) {
-        body.push(el("div", { class: "actions" }, [el("button", { class: "primary", text: u.busy ? "Starting…" : "Sign in with " + s.label, onclick: function () { startDevice(s); } })]));
-        body.push(el("button", { class: "link", text: "Paste a token instead", onclick: function () { setUi(s.id, { paste: true }); } }));
+        body.push(el("div", { class: "panel" }, [
+          el("div", { class: "actions" }, [el("button", { class: "primary", text: u.busy ? "Starting…" : "Sign in with " + s.label, onclick: function () { startDevice(s); } })]),
+          el("button", { class: "link", text: "Paste a token instead", onclick: function () { setUi(s.id, { paste: true }); } }),
+        ]));
       } else {
-        if (s.help) body.push(helpText(s.help));
-        var input = el("input", { type: "password", placeholder: s.label + " token", autocomplete: "off", value: u.draft || "", oninput: function (e) { (ui[s.id] = ui[s.id] || {}).draft = e.target.value; } });
-        body.push(el("div", { class: "inline" }, [input, el("button", { class: "primary", text: u.busy ? "Saving…" : "Save", onclick: function () { saveSecret(s, input.value); } })]));
+        var input = el("input", { type: "password", placeholder: s.label + " token", "aria-label": s.label + " token", autocomplete: "off", value: u.draft || "", oninput: function (e) { (ui[s.id] = ui[s.id] || {}).draft = e.target.value; }, onenter: function () { saveSecret(s, input.value); } });
+        body.push(el("div", { class: "panel" }, [
+          s.help ? helpText(s.help) : null,
+          el("div", { class: "inline" }, [input, el("button", { class: "primary", text: u.busy ? "Saving…" : "Save", onclick: function () { saveSecret(s, input.value); } })]),
+          s.method === "github" ? el("button", { class: "link", text: "Sign in with " + s.label + " instead", onclick: function () { setUi(s.id, { paste: false }); } }) : null,
+        ]));
       }
       if (s.device && s.device.error) body.push(el("div", { class: "error", text: s.device.error }));
     }
     if (u.error) body.push(el("div", { class: "error", text: u.error }));
-    return el("div", { class: "card" }, [
-      el("div", { class: "row" }, [el("div", {}, [el("div", { class: "name", text: s.label })]), status]),
-      el("div", { class: "body" }, body),
-    ]);
+    return stop(kind, s.label, null, label, null, body);
   }
 
   function render() {
     if (!state) return;
+    var focused = document.activeElement && document.activeElement.id;
     var cards = document.getElementById("cards");
     cards.innerHTML = "";
-    cards.appendChild(claudeCard());
-    state.services.forEach(function (s) { cards.appendChild(serviceCard(s)); });
+    cards.appendChild(claudeStop());
+    state.services.forEach(function (s) { cards.appendChild(serviceStop(s)); });
     var total = state.services.length + 1;
     var done = (state.claude.connected ? 1 : 0) + state.services.filter(function (s) { return s.connected; }).length;
-    document.getElementById("bar").style.width = Math.round((done / total) * 100) + "%";
-    document.getElementById("progress-label").textContent = done + " of " + total + " connected";
+    var tally = document.getElementById("tally");
+    tally.className = "tally" + (done === total ? " all" : "");
+    tally.innerHTML = "";
+    tally.appendChild(el("strong", { text: done + " / " + total }));
+    tally.appendChild(el("span", { text: done === total ? "All connected" : "connected" }));
+    if (focused) { var again = document.getElementById(focused); if (again) again.focus(); }
   }
 
   function startClaude(fresh) {
