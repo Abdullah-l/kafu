@@ -783,7 +783,6 @@ interface SlackReply {
   files?: SlackFile[];
 }
 
-// Claude writes GitHub markdown; Slack mrkdwn shows **bold**, # headings and [links](url) literally.
 export function markdownToMrkdwn(text: string): string {
   return text.split(/(```[\s\S]*?```|`[^`\n]+`)/g).map((part, i) => {
     if (i % 2 === 1) return part;
@@ -798,7 +797,6 @@ export function markdownToMrkdwn(text: string): string {
   }).join("");
 }
 
-// Swap bare Slack user IDs (U0ABC...) for the person's name so replies don't show raw IDs.
 async function withoutBareUserIds(token: string, text: string): Promise<string> {
   const re = /(?<![<@\w])([UW][A-Z0-9]{8,})(?![\w>|])/g;
   const ids = [...new Set([...text.matchAll(re)].map((m) => m[1]))];

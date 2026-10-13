@@ -874,8 +874,13 @@ export function setPermissionMode(mode: PermissionMode): void {
   }
 }
 
-// Commits and PRs go out under the person's name only: no Co-Authored-By or "Generated with Claude Code" lines.
-export const NO_ATTRIBUTION_ARGS = ["--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, includeCoAuthoredBy: false })];
+const AI_ATTRIBUTION_GUARD = `grep -qiE 'co-authored-by:[^"]*(claude|anthropic)|generated with \\[?claude code' && { echo 'Blocked: no AI attribution in commits or PRs. Remove the Co-Authored-By Claude / Generated with Claude Code line and retry.' >&2; exit 2; } || exit 0`;
+
+export const NO_ATTRIBUTION_ARGS = ["--settings", JSON.stringify({
+  attribution: { commit: "", pr: "" },
+  includeCoAuthoredBy: false,
+  hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: AI_ATTRIBUTION_GUARD }] }] },
+})];
 
 function buildSecurityArgs(security: SecurityConfig): string[] {
   const permissionMode = getPermissionMode();
