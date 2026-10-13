@@ -37,6 +37,14 @@ async function fileStillExists(token: string, fileId: string): Promise<boolean> 
   }
 }
 
+async function waitUntilProcessed(token: string, fileId: string): Promise<void> {
+  for (let i = 0; i < 15; i++) {
+    const info = await slackForm<{ file: { original_w?: number } }>(token, "files.info", { file: fileId }).catch(() => null);
+    if (info?.file.original_w) return;
+    await Bun.sleep(1000);
+  }
+}
+
 async function upload(token: string, path: string): Promise<string> {
   const bytes = await readFile(path);
   const hash = createHash("sha256").update(bytes).digest("hex");
@@ -49,6 +57,7 @@ async function upload(token: string, path: string): Promise<string> {
   const put = await fetch(target.upload_url, { method: "POST", body: bytes });
   if (!put.ok) throw new Error(`Slack upload failed: HTTP ${put.status}`);
   await slackForm(token, "files.completeUploadExternal", { files: JSON.stringify([{ id: target.file_id, title: name }]) });
+  await waitUntilProcessed(token, target.file_id);
 
   cache[path] = { hash, fileId: target.file_id };
   await mkdir(join(process.cwd(), ".claude", "kafu"), { recursive: true });
