@@ -18,6 +18,7 @@ export interface RunRequest {
 export type ServerMessage =
   | RunRequest
   | { type: "cancel"; id: string }
+  | { type: "forget"; sessionKey: string }
   | { type: "welcome"; userId: string };
 
 export type AgentMessage =

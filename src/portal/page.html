@@ -4,89 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{TITLE}}</title>
-<style>
-:root {
-  --paper: #f2f4f3; --panel: #ffffff; --ink: #18212b; --muted: #5c6873; --line: #d6dcd9;
-  --accent: #2b4fd8; --accent-ink: #ffffff; --signal: #1e7a5a; --signal-soft: #e1f1ea;
-  --pending: #a8650f; --pending-soft: #fbefd9; --err: #b42318; --err-soft: #fde8e7; --well: #e9edeb;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #10151a; --panel: #171e25; --ink: #e4e9ee; --muted: #93a0ad; --line: #2a333c;
-    --accent: #8ea4ff; --accent-ink: #0e1430; --signal: #4fd1a1; --signal-soft: #15342a;
-    --pending: #f0b75a; --pending-soft: #3a2c12; --err: #ff8a80; --err-soft: #3d1a18; --well: #1f2730;
-    color-scheme: dark;
-  }
-}
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-main { max-width: 620px; margin: 0 auto; padding: 48px 20px 72px; }
-header { margin-bottom: 36px; }
-h1 { font-size: 30px; line-height: 1.15; font-weight: 750; letter-spacing: -0.025em; margin: 0 0 8px; }
-header p { margin: 0; color: var(--muted); max-width: 52ch; }
-.tally { margin-top: 18px; display: flex; align-items: baseline; gap: 10px; font-size: 14px; color: var(--muted); }
-.tally strong { font-size: 22px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
-.tally.all strong { color: var(--signal); }
-ol.rail { list-style: none; margin: 0; padding: 0; }
-.stop { position: relative; padding: 0 0 28px 40px; }
-.stop::before { content: ""; position: absolute; left: 9px; top: 22px; bottom: -2px; width: 2px; background: var(--line); }
-.stop:last-child::before { display: none; }
-.stop.on::before { background: var(--signal); }
-.node { position: absolute; left: 0; top: 3px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--line); background: var(--paper); display: grid; place-items: center; }
-.stop.on .node { border-color: var(--signal); background: var(--signal); }
-.stop.on .node::after { content: ""; width: 5px; height: 9px; border: solid var(--paper); border-width: 0 2px 2px 0; transform: translate(0, -1px) rotate(45deg); }
-.stop.wait .node { border-color: var(--pending); }
-.stop.wait .node::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--pending); animation: pulse 1.4s ease-in-out infinite; }
-.stop.bad .node { border-color: var(--err); }
-@keyframes pulse { 50% { opacity: .3; } }
-.head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.name { font-weight: 650; font-size: 17px; letter-spacing: -0.01em; }
-.tag { font-size: 12px; font-weight: 600; color: var(--muted); margin-left: 8px; }
-.state { font-size: 13px; font-weight: 600; white-space: nowrap; color: var(--muted); }
-.state.ok { color: var(--signal); }
-.state.wait { color: var(--pending); }
-.state.err { color: var(--err); }
-.sub { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
-.body { margin-top: 12px; display: grid; gap: 12px; }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; }
-.help { color: var(--muted); font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
-.help a, a.inline-link { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
-.help a:hover, a.inline-link:hover { text-decoration-thickness: 2px; }
-ol.steps { margin: 0; padding-left: 20px; color: var(--muted); font-size: 13.5px; display: grid; gap: 4px; }
-button, .button { font: inherit; font-weight: 600; font-size: 14px; border: 1px solid transparent; border-radius: 8px; padding: 8px 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: filter .15s, background .15s; }
-button.primary, .button.primary { background: var(--accent); color: var(--accent-ink); }
-button.primary:hover, .button.primary:hover { filter: brightness(1.08); }
-button.ghost { background: transparent; color: var(--muted); border-color: var(--line); }
-button.ghost:hover { color: var(--ink); border-color: var(--muted); }
-button.danger:hover { color: var(--err); border-color: var(--err); }
-button:disabled { opacity: .55; cursor: default; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-input, select { font: inherit; width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
-input:focus, select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
-.inline { display: flex; gap: 8px; }
-.inline input { flex: 1; min-width: 0; }
-.field { display: grid; gap: 6px; }
-.field label { font-size: 13px; font-weight: 600; }
-.code { font: 600 28px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .14em; background: var(--well); border-radius: 8px; padding: 16px; text-align: center; user-select: all; }
-.error { color: var(--err); background: var(--err-soft); border-radius: 8px; padding: 8px 12px; font-size: 13.5px; }
-.link { color: var(--accent); background: none; border: 0; padding: 0; font-weight: 500; font-size: 13.5px; cursor: pointer; justify-self: start; text-decoration: underline; text-underline-offset: 2px; }
-.connected-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-footer { margin-top: 12px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
-.expired { padding-top: 20vh; }
-@media (max-width: 480px) {
-  main { padding-top: 32px; }
-  h1 { font-size: 25px; }
-  .inline { flex-direction: column; }
-}
-@media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
-}
-</style>
+<link rel="stylesheet" href="/portal.css">
 </head>
 <body>
 <main>
+  <nav class="tabs"><a href="/connect" aria-current="page">Connections</a><a href="/conversations">Conversations</a></nav>
   <header>
     <h1>{{TITLE}}</h1>
     <p>Connect your own accounts. Tokens are stored encrypted and only used for your requests.</p>
@@ -95,92 +17,14 @@ footer { margin-top: 12px; padding-top: 20px; border-top: 1px solid var(--line);
   <ol class="rail" id="cards"></ol>
   <footer>Signed in from Slack. This page only shows your own connections. Need a fresh link? Mention the bot with <code>connect</code>.</footer>
 </main>
+<script src="/portal.js"></script>
 <script>
 (function () {
   var state = null;
   var ui = {};
   var pollTimer = null;
-  var LINK = /(https?:\/\/[^\s<>"'`]+|\b(?:[a-z0-9-]+\.)+(?:com|io|net|org|dev|app|ai|sa|co)\b(?:\/[^\s<>"'`]*)?)/gi;
 
-  function api(path, body) {
-    var opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "x-kafu": "1" }, body: JSON.stringify(body) };
-    return fetch(path, opts).then(function (r) {
-      return r.json().then(function (data) {
-        if (r.status === 401) { showExpired(); throw new Error("expired"); }
-        return data;
-      });
-    });
-  }
-
-  function showExpired() {
-    var main = document.querySelector("main");
-    main.innerHTML = "";
-    main.className = "expired";
-    main.appendChild(el("h1", { text: "Your session expired" }));
-    main.appendChild(el("p", { class: "help", text: "Ask for a new link in Slack: mention the bot with connect." }));
-  }
-
-  function el(tag, attrs, children) {
-    var node = document.createElement(tag);
-    Object.keys(attrs || {}).forEach(function (k) {
-      if (k === "text") node.textContent = attrs[k];
-      else if (k === "onclick") node.addEventListener("click", attrs[k]);
-      else if (k === "oninput") node.addEventListener("input", attrs[k]);
-      else if (k === "onenter") node.addEventListener("keydown", function (e) { if (e.key === "Enter") attrs[k](e); });
-      else if (k === "value") node.value = attrs[k];
-      else if (attrs[k] === null || attrs[k] === undefined) return;
-      else node.setAttribute(k, attrs[k]);
-    });
-    (children || []).forEach(function (c) { if (c) node.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
-    return node;
-  }
-
-  function anchor(href, text, cls) {
-    return el("a", { class: cls || "inline-link", href: href, target: "_blank", rel: "noopener noreferrer", text: text });
-  }
-
-  function linkify(text) {
-    var frag = document.createDocumentFragment();
-    var last = 0;
-    text.replace(LINK, function (match, _g, offset) {
-      var url = match.replace(/[.,;:!?)\]]+$/, "");
-      if (offset > last) frag.appendChild(document.createTextNode(text.slice(last, offset)));
-      var href = /^https?:\/\//i.test(url) ? url : "https://" + url;
-      frag.appendChild(anchor(href, url.replace(/^https?:\/\//i, "")));
-      last = offset + url.length;
-      return match;
-    });
-    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-    return frag;
-  }
-
-  function helpText(text) {
-    var node = el("div", { class: "help" });
-    node.appendChild(linkify(text));
-    return node;
-  }
-
-  function copyText(text, button) {
-    var done = function () { if (button) { button.textContent = "Copied"; setTimeout(function () { button.textContent = "Copy code"; }, 1500); } };
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text); done(); });
-    } else {
-      fallbackCopy(text);
-      done();
-    }
-  }
-
-  function fallbackCopy(text) {
-    var area = document.createElement("textarea");
-    area.value = text;
-    area.setAttribute("readonly", "");
-    area.style.position = "fixed";
-    area.style.opacity = "0";
-    document.body.appendChild(area);
-    area.select();
-    try { document.execCommand("copy"); } catch (e) {}
-    document.body.removeChild(area);
-  }
+  var api = Portal.api, el = Portal.el, anchor = Portal.anchor, helpText = Portal.helpText, copyText = Portal.copyText;
 
   function refresh() {
     return api("/api/status").then(function (s) { state = s; render(); schedulePoll(); });

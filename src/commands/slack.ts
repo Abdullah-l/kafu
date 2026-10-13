@@ -10,6 +10,7 @@ import { resolveSkillPrompt } from "../skills";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { getRunIdentity, type RunIdentity } from "../users";
 import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, CONNECT_ACTION_PREFIX, LINK_ACTION_ID, type AccountIO } from "./slack-accounts";
+import { recordTurn, setAssistantName, onConversationDeleted, threadSessionKey, type TurnStatus } from "../conversations";
 import { mkdir, realpath } from "node:fs/promises";
 import { extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
@@ -122,6 +123,12 @@ function botMessageKey(channelId: string, threadTs?: string): string {
 
 const threadHistoryLoaded = new Map<string, number>();
 const seenThreadImages = new Map<string, { at: number; ids: Set<string> }>();
+
+onConversationDeleted((userId, conversation) => {
+  const key = threadSessionKey(conversation, userId);
+  threadHistoryLoaded.delete(key);
+  seenThreadImages.delete(key);
+});
 const EARLIER_IMAGE_LIMIT = 3;
 const THREAD_STATE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -908,6 +915,15 @@ function accountIO(token: string, userId: string, channelId: string, threadTs: s
   };
 }
 
+async function slackLink(token: string, channelId: string, ts: string): Promise<{ permalink: string; channelName: string }> {
+  const [link, info] = await Promise.all([
+    slackApi<{ permalink: string }>(token, "chat.getPermalink", { channel: channelId, message_ts: ts }).catch(() => null),
+    slackApi<{ channel: { name?: string; is_im?: boolean } }>(token, "conversations.info", { channel: channelId }).catch(() => null),
+  ]);
+  const channel = info?.channel;
+  return { permalink: link?.permalink ?? "", channelName: channel?.is_im ? "Direct message" : channel?.name ? `#${channel.name}` : "" };
+}
+
 function userThreadKey(channelId: string, threadTs: string, userId: string): string {
   return `slk:${channelId}:${threadTs}:${userId}`;
 }
@@ -1290,11 +1306,15 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     }
 
     const stopped = consumeUserStopped(cancelKey);
+    let recordedReply = "";
+    let recordedStatus: TurnStatus = "ok";
     const authFailed = !!identity && (result.exitCode === 0
       ? result.stdout.trim().length < 300 && /^(failed to authenticate|api error: 401)/i.test(result.stdout.trim())
       : isAuthFailure(`${result.stdout}\n${result.stderr}`));
 
     if (stopped) {
+      recordedReply = "Stopped.";
+      recordedStatus = "stopped";
       await removeReaction(config.botToken, channelId, event.ts, "hourglass_flowing_sand");
       await clearAssistantStatus(config.botToken, channelId, replyThreadTs);
       if (progressTs) {
@@ -1312,6 +1332,8 @@ async function handleMessage(event: SlackMessage): Promise<void> {
         : authFailed
           ? "Your Claude sign-in isn't working anymore. DM me `login` to reconnect."
           : `Something went wrong on my end${detail ? `: ${detail}` : "."}`;
+      recordedReply = friendly;
+      recordedStatus = "error";
       if (progressTs) {
         await collapseProgress(config.botToken, channelId, progressTs, `⚠️ ${friendly}`);
       } else {
@@ -1325,6 +1347,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       const { cleanedText: finalText, buttons, select } = extractBlockKitDirectives(afterChannelRead);
 
       const reuseProgress = !!progressTs && !!finalText && !buttons && !select && finalText.length <= 3800;
+      recordedReply = finalText || editContent || "";
 
       if (reactionEmoji) {
         await sendReaction(config.botToken, channelId, event.ts, reactionEmoji);
@@ -1463,6 +1486,19 @@ async function handleMessage(event: SlackMessage): Promise<void> {
 
       await removeReaction(config.botToken, channelId, event.ts, "hourglass_flowing_sand");
       await clearAssistantStatus(config.botToken, channelId, replyThreadTs);
+    }
+
+    if (actingUserId) {
+      const linkTs = agentDirThread === "dm" ? event.ts : replyThreadTs;
+      await recordTurn(actingUserId, {
+        channelId,
+        threadTs: agentDirThread,
+        mode: agentUserId ? "computer" : "server",
+        message: [cleanText.trim(), voiceTranscript ? `(voice) ${voiceTranscript}` : ""].filter(Boolean).join("\n") || "(attachment)",
+        reply: recordedReply,
+        status: recordedStatus,
+        resolveLink: () => slackLink(config.botToken, channelId, linkTs),
+      }).catch((err) => console.error(`[Slack] Failed to record conversation: ${err instanceof Error ? err.message : err}`));
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -1956,6 +1992,7 @@ export function startSlack(debug = false): void {
       );
       botUserId = authData.user_id;
       botUsername = authData.user;
+      setAssistantName(botUsername);
       console.log(`  Bot: @${botUsername} (${botUserId})`);
     } catch (err) {
       console.error(`[Slack] auth.test failed: ${err instanceof Error ? err.message : err}`);
@@ -1991,6 +2028,7 @@ export async function slack(): Promise<void> {
     const authData = await slackApi<{ user_id: string; user: string }>(config.botToken, "auth.test", {});
     botUserId = authData.user_id;
     botUsername = authData.user;
+    setAssistantName(botUsername);
     console.log(`  Bot: @${botUsername} (${botUserId})`);
   } catch (err) {
     console.error(`[Slack] auth.test failed: ${err instanceof Error ? err.message : err}`);

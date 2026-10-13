@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ASSISTANT}} conversations</title>
+<link rel="stylesheet" href="/portal.css">
+</head>
+<body>
+<main class="wide">
+  <nav class="tabs"><a href="/connect">Connections</a><a href="/conversations" aria-current="page">Conversations</a></nav>
+  <header>
+    <h1>Your conversations</h1>
+    <p>Everything you've asked {{ASSISTANT}} in Slack. Only you can see these. Deleting one erases what {{ASSISTANT}} kept from it; the messages in Slack stay.</p>
+    <div class="tally" id="tally"></div>
+  </header>
+  <div class="toolbar" id="toolbar" hidden>
+    <input id="filter" type="search" placeholder="Filter by text or channel" aria-label="Filter conversations" autocomplete="off">
+    <span id="bulk"></span>
+  </div>
+  <ul class="convos" id="list"></ul>
+  <div class="empty" id="empty" hidden><strong>No conversations yet</strong>Mention {{ASSISTANT}} in a Slack channel and the thread shows up here.</div>
+  <footer>Signed in from Slack. Need a fresh link? Mention the bot with <code>connect</code>.</footer>
+</main>
+<script src="/portal.js"></script>
+<script>
+(function () {
+  var api = Portal.api, el = Portal.el, anchor = Portal.anchor, linkify = Portal.linkify;
+  var assistant = document.title.replace(/ conversations$/, "");
+  var items = [];
+  var open = {};
+  var details = {};
+  var confirming = null;
+  var filterText = "";
+  var INLINE = /<(https?:\/\/[^|>\s]+)(?:\|([^>]+))?>|`([^`\n]+)`/g;
+
+  function when(iso) {
+    var d = new Date(iso);
+    var now = new Date();
+    var time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var diff = Math.round((day - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+    if (diff === 0) return "Today " + time;
+    if (diff === 1) return "Yesterday " + time;
+    return d.toLocaleDateString([], { month: "short", day: "numeric", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" }) + " " + time;
+  }
+
+  function inline(text, into) {
+    var last = 0;
+    text.replace(INLINE, function (match, url, label, code, offset) {
+      if (offset > last) into.appendChild(linkify(text.slice(last, offset)));
+      if (url) into.appendChild(anchor(url, label || url.replace(/^https?:\/\//i, "")));
+      else into.appendChild(el("code", { text: code }));
+      last = offset + match.length;
+      return match;
+    });
+    if (last < text.length) into.appendChild(linkify(text.slice(last)));
+  }
+
+  function rich(text) {
+    var node = el("div", { class: "bubble" });
+    text.split(/```/).forEach(function (part, i) {
+      if (i % 2 === 1) node.appendChild(el("pre", { text: part.replace(/^\n|\n$/g, "") }));
+      else if (part) inline(i > 0 ? part.replace(/^\n/, "") : part, node);
+    });
+    return node;
+  }
+
+  function load() {
+    return api("/api/conversations").then(function (r) { items = r.conversations || []; render(); });
+  }
+
+  function toggle(id) {
+    open[id] = !open[id];
+    if (open[id] && !details[id]) {
+      details[id] = "loading";
+      api("/api/conversations/" + id).then(function (r) { details[id] = r.conversation || null; render(); });
+    }
+    render();
+  }
+
+  function remove(id) {
+    confirming = "busy:" + id;
+    render();
+    api("/api/conversations/" + id + "/delete", {}).then(function () {
+      items = items.filter(function (c) { return c.id !== id; });
+      delete open[id];
+      delete details[id];
+      confirming = null;
+      render();
+    });
+  }
+
+  function removeAll() {
+    confirming = "busy:all";
+    render();
+    api("/api/conversations/delete-all", {}).then(function () {
+      items = [];
+      open = {};
+      details = {};
+      confirming = null;
+      render();
+    });
+  }
+
+  function confirmRow(key, question, label, action) {
+    if (confirming === "busy:" + key) return el("span", { class: "confirm", text: "Deleting…" });
+    if (confirming !== key) return null;
+    return el("span", { class: "confirm" }, [
+      question,
+      el("button", { class: "destroy", text: label, onclick: action }),
+      el("button", { class: "ghost", text: "Cancel", onclick: function () { confirming = null; render(); } }),
+    ]);
+  }
+
+  function transcript(c) {
+    var d = details[c.id];
+    if (d === "loading") return el("div", { class: "loading", text: "Loading…" });
+    if (!d) return el("div", { class: "error", text: "This conversation couldn't be loaded." });
+    return el("div", { class: "turns" }, d.turns.map(function (t) {
+      return el("div", { class: "exchange" }, [
+        el("div", { class: "turn you" }, [el("div", { class: "speaker" }, ["You", el("time", { datetime: t.at, text: when(t.at) })]), rich(t.message)]),
+        el("div", { class: "turn bot" + (t.status === "ok" ? "" : " error") }, [el("div", { class: "speaker", text: assistant }), rich(t.reply || "(no text reply)")]),
+      ]);
+    }));
+  }
+
+  function row(c) {
+    var isOpen = !!open[c.id];
+    var meta = el("span", { class: "convo-meta" }, [
+      el("span", { class: "where", text: c.channelName || c.channelId }),
+      el("span", { text: when(c.updatedAt) }),
+      el("span", { text: c.turnCount + (c.turnCount === 1 ? " message" : " messages") }),
+      el("span", { text: c.mode === "computer" ? "Ran on your computer" : "Ran on the server" }),
+    ]);
+    var head = el("button", { class: "convo-head", "aria-expanded": String(isOpen), onclick: function () { toggle(c.id); } }, [
+      el("span", { class: "convo-title", text: c.title }),
+      meta,
+    ]);
+    var children = [head];
+    if (isOpen) {
+      var actions = el("div", { class: "convo-actions" }, [
+        c.permalink ? anchor(c.permalink, "Open in Slack", "button primary") : el("span", { class: "help", text: "No Slack link for this one." }),
+        confirming === c.id || confirming === "busy:" + c.id
+          ? confirmRow(c.id, "Delete this conversation?", "Delete", function () { remove(c.id); })
+          : el("button", { class: "ghost danger", text: "Delete", onclick: function () { confirming = c.id; render(); } }),
+      ]);
+      children.push(el("div", { class: "convo-body" }, [actions, transcript(c)]));
+    }
+    return el("li", { class: "convo" + (isOpen ? " open" : "") }, children);
+  }
+
+  function render() {
+    var list = document.getElementById("list");
+    list.innerHTML = "";
+    var q = filterText.toLowerCase();
+    var shown = items.filter(function (c) { return !q || (c.title + " " + c.channelName + " " + c.lastReply).toLowerCase().indexOf(q) >= 0; });
+    shown.forEach(function (c) { list.appendChild(row(c)); });
+    document.getElementById("empty").hidden = items.length > 0;
+    document.getElementById("toolbar").hidden = items.length === 0;
+    var tally = document.getElementById("tally");
+    tally.innerHTML = "";
+    if (items.length) {
+      tally.appendChild(el("strong", { text: String(items.length) }));
+      tally.appendChild(el("span", { text: items.length === 1 ? "conversation" : "conversations" }));
+    }
+    var bulk = document.getElementById("bulk");
+    bulk.innerHTML = "";
+    bulk.appendChild(confirmRow("all", "Delete all " + items.length + "?", "Delete all", removeAll)
+      || el("button", { class: "ghost danger", text: "Delete all", onclick: function () { confirming = "all"; render(); } }));
+    if (q && shown.length === 0) list.appendChild(el("li", { class: "empty", text: "Nothing matches “" + filterText + "”." }));
+  }
+
+  document.getElementById("filter").addEventListener("input", function (e) { filterText = e.target.value.trim(); render(); });
+  load();
+})();
+</script>
+</body>
+</html>
