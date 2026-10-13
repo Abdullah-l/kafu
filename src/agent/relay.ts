@@ -86,7 +86,7 @@ export async function loadAttachments(paths: string[]): Promise<Attachment[]> {
 
 export function runOnAgent(
   userId: string,
-  request: { prompt: string; sessionKey: string; model: string; system: string; timeoutMs: number; attachments: Attachment[] },
+  request: { prompt: string; sessionKey: string; model: string; system: string; timeoutMs: number; attachments: Attachment[]; protectedRepos?: string[] },
   onEvent?: (line: string) => void,
   cancelKey?: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {

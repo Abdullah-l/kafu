@@ -39,6 +39,7 @@ export interface RunIdentity {
   configDir: string;
   model: string;
   secrets: Record<string, string>;
+  readable?: string[];
 }
 
 let keyCache: Buffer | null = null;

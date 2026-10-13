@@ -62,7 +62,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
   slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false },
-  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", agentInstall: DEFAULT_AGENT_INSTALL, linkNote: "" } },
+  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", agentInstall: DEFAULT_AGENT_INSTALL, linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
@@ -118,6 +118,7 @@ export interface MultiUserConfig {
   credentials: CredentialSpec[];
   directMessages: boolean;
   portal: PortalConfig;
+  protectedRepos: string[];
 }
 
 export type SecurityLevel =
@@ -306,6 +307,9 @@ function parseSettings(raw: Record<string, any>): Settings {
       mcpConfig: typeof raw.multiUser?.mcpConfig === "string" ? raw.multiUser.mcpConfig.trim() : "",
       credentials: parseCredentials(raw.multiUser?.credentials),
       directMessages: raw.multiUser?.directMessages !== false,
+      protectedRepos: Array.isArray(raw.multiUser?.protectedRepos)
+        ? raw.multiUser.protectedRepos.filter((r: unknown): r is string => typeof r === "string" && /^[\w.-]+\/[\w.-]+$/.test(r.trim())).map((r: string) => r.trim())
+        : [],
       portal: {
         enabled: raw.multiUser?.portal?.enabled === true,
         host: typeof raw.multiUser?.portal?.host === "string" && raw.multiUser.portal.host.trim() ? raw.multiUser.portal.host.trim() : "0.0.0.0",

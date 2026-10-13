@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename, rm, chmod } from "node:fs/promises";
 import { CLAUDE_EXECUTABLE, NO_ATTRIBUTION_ARGS, runClaudeStream, killRun, watchRunMeta } from "../runner";
 import { findSessionJsonlPath } from "../sessionFiles";
+import { guardSettings } from "../isolation";
 import { AGENT_PROTOCOL_VERSION, type AgentMessage, type RunRequest, type ServerMessage } from "./protocol";
 
 const HOME = process.env.KAFU_AGENT_HOME || join(homedir(), ".kafu");
@@ -109,6 +110,7 @@ async function execute(config: AgentConfig, request: RunRequest, emit: (message:
     else args.push("--permission-mode", config.permissionMode);
     if (config.allowedTools.length > 0) args.push("--allowedTools", config.allowedTools.join(" "));
     if (resume) args.push("--resume", resume);
+    if (request.protectedRepos?.length) args.push("--settings", JSON.stringify(guardSettings(request.protectedRepos)));
     args.push("--append-system-prompt", system);
     return args;
   };
