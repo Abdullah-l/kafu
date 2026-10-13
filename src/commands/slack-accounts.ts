@@ -9,7 +9,6 @@ import { portalLink, portalBaseUrl } from "../portal/server";
 import { createPairCode } from "../portal/auth";
 import { removeUserDevices } from "../users";
 import { disconnectAgents, isPaired, onlineAgent } from "../agent/relay";
-import { slackImageFileId } from "./slack-files";
 
 export interface AccountIO {
   dm(text: string): Promise<void>;
@@ -25,33 +24,16 @@ export function portalEnabled(): boolean {
 
 export async function sendPortalLink(userId: string, io: AccountIO, intro: string): Promise<void> {
   const url = await portalLink(userId);
-  const { linkNote, linkImage } = getSettings().multiUser.portal;
+  const { linkNote } = getSettings().multiUser.portal;
   const text = `${intro} <${url}|Open your connections> (expires in 15 minutes)${linkNote ? `\n${linkNote}` : ""}`;
-  const blocks: Record<string, unknown>[] = [
+  const blocks = [
     { type: "section", text: { type: "mrkdwn", text: intro } },
     { type: "actions", elements: [{ type: "button", style: "primary", action_id: LINK_ACTION_ID, text: { type: "plain_text", text: "Open your connections" }, url }] },
     ...(linkNote ? [{ type: "section", text: { type: "mrkdwn", text: linkNote } }] : []),
     { type: "context", elements: [{ type: "mrkdwn", text: "The link expires in 15 minutes." }] },
   ];
-  if (!io.ephemeral) {
-    await io.dm(text);
-    return;
-  }
-  const imageId = linkImage ? await slackImageFileId(getSettings().slack.botToken, linkImage).catch((err) => {
-    console.error(`[Slack] Couldn't upload the connections image: ${err instanceof Error ? err.message : err}`);
-    return null;
-  }) : null;
-  if (imageId) {
-    const withImage = [...blocks];
-    withImage.splice(linkNote ? 3 : 2, 0, { type: "image", slack_file: { id: imageId }, alt_text: "Connected" });
-    try {
-      await io.ephemeral(text, withImage);
-      return;
-    } catch (err) {
-      console.error(`[Slack] Connections reply with image failed, sending without it: ${err instanceof Error ? err.message : err}`);
-    }
-  }
-  await io.ephemeral(text, blocks);
+  if (io.ephemeral) await io.ephemeral(text, blocks);
+  else await io.dm(text);
 }
 
 async function handlePortalMode(userId: string, lower: string, respond: (text: string) => Promise<void>, io: AccountIO): Promise<boolean> {
