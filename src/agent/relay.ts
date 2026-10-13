@@ -4,7 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { addUserDevice, listUserDevices } from "../users";
 import { createDeviceToken, redeemPairCode, verifyDeviceToken } from "../portal/auth";
-import { registerRemoteCancel, unregisterRemoteCancel } from "../runner";
+import { registerRemoteCancel, unregisterRemoteCancel, emitRunMeta } from "../runner";
 import { MAX_ATTACHMENT_BYTES, type AgentMessage, type Attachment, type ServerMessage } from "./protocol";
 
 export interface AgentSocketData {
@@ -121,6 +121,11 @@ export const agentWebSocket = {
     try {
       message = JSON.parse(String(raw)) as AgentMessage;
     } catch {
+      return;
+    }
+    if (message.type === "meta") {
+      const entry = pending.get(message.id);
+      if (entry && entry.socket === socket) emitRunMeta(entry.run.cancelKey, { model: message.model, contextTokens: message.contextTokens, contextWindow: message.contextWindow });
       return;
     }
     if (message.type === "event") {

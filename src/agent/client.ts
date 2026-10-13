@@ -2,7 +2,7 @@ import { homedir, hostname } from "node:os";
 import { join, basename } from "node:path";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename, rm, chmod } from "node:fs/promises";
-import { CLAUDE_EXECUTABLE, runClaudeStream, killRun } from "../runner";
+import { CLAUDE_EXECUTABLE, runClaudeStream, killRun, watchRunMeta } from "../runner";
 import { findSessionJsonlPath } from "../sessionFiles";
 import { AGENT_PROTOCOL_VERSION, type AgentMessage, type RunRequest, type ServerMessage } from "./protocol";
 
@@ -114,11 +114,17 @@ async function execute(config: AgentConfig, request: RunRequest, emit: (message:
   };
 
   const onToolEvent = (line: string) => emit({ type: "event", id: request.id, line });
+  const stopMeta = watchRunMeta(request.id, (meta) => emit({ type: "meta", id: request.id, ...meta }));
   const existing = (await sessions())[request.sessionKey];
-  let result = await runClaudeStream(build(existing), request.model, "", localEnv(), request.timeoutMs, config.workspace, undefined, onToolEvent, request.id);
-  if (existing && result.exitCode !== 0 && STALE_SESSION.test(`${result.rawStdout}\n${result.stderr}`)) {
-    await rememberSession(request.sessionKey, null);
-    result = await runClaudeStream(build(), request.model, "", localEnv(), request.timeoutMs, config.workspace, undefined, onToolEvent, request.id);
+  let result;
+  try {
+    result = await runClaudeStream(build(existing), request.model, "", localEnv(), request.timeoutMs, config.workspace, undefined, onToolEvent, request.id);
+    if (existing && result.exitCode !== 0 && STALE_SESSION.test(`${result.rawStdout}\n${result.stderr}`)) {
+      await rememberSession(request.sessionKey, null);
+      result = await runClaudeStream(build(), request.model, "", localEnv(), request.timeoutMs, config.workspace, undefined, onToolEvent, request.id);
+    }
+  } finally {
+    stopMeta();
   }
   if (result.sessionId) await rememberSession(request.sessionKey, result.sessionId);
   await rm(join(INBOX, request.id), { recursive: true, force: true });

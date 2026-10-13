@@ -6,6 +6,8 @@ import {
   extractReactionDirective,
   assistantKey,
   parseSlackLinks,
+  formatElapsed,
+  runStatusLine,
 } from "../commands/slack";
 
 describe("assistantKey", () => {
@@ -88,5 +90,23 @@ describe("parseSlackLinks", () => {
   test("dedupes the same thread and ignores other links", () => {
     const link = "https://acme.slack.com/archives/C1/p1700000000000100";
     expect(parseSlackLinks(`${link} <${link}|${link}> https://example.com/archives/C1/p1`)).toHaveLength(1);
+  });
+});
+
+describe("runStatusLine", () => {
+  test("shows elapsed time before anything else is known", () => {
+    expect(runStatusLine({}, 7_400)).toBe("⏱ 7s");
+  });
+
+  test("shows model and context usage", () => {
+    expect(runStatusLine({ model: "claude-opus-5-5", contextTokens: 42_300, contextWindow: 200_000 }, 83_000))
+      .toBe("⏱ 1m 23s   🧠 Opus 5.5   📚 42k / 200k context (21%)");
+    expect(runStatusLine({ model: "claude-sonnet-5-5[1m]", contextTokens: 250_000, contextWindow: 1_000_000 }, 3_725_000))
+      .toBe("⏱ 1h 02m   🧠 Sonnet 5.5   📚 250k / 1M context (25%)");
+  });
+
+  test("formats elapsed time", () => {
+    expect(formatElapsed(0)).toBe("0s");
+    expect(formatElapsed(605_000)).toBe("10m 05s");
   });
 });
