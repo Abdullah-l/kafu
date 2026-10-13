@@ -202,6 +202,7 @@ export async function writeManagedSettings(repos: string[]): Promise<void> {
   await mkdir(dirname(MANAGED_SETTINGS), { recursive: true });
   await writeFile(MANAGED_SETTINGS, JSON.stringify(settings, null, 2) + "\n", { mode: 0o644 });
   await chown(MANAGED_SETTINGS, 0, 0);
+  await chmod(MANAGED_SETTINGS, 0o644);
   await chown(dirname(MANAGED_SETTINGS), 0, 0);
   await chmod(dirname(MANAGED_SETTINGS), 0o755);
 }
