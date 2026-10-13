@@ -728,7 +728,7 @@ async function slackUserName(token: string, userId: string): Promise<string> {
   } catch (err) {
     if (!missingScope(err)) debugLog(`users.info ${userId} failed: ${err instanceof Error ? err.message : err}`);
   }
-  userNames.set(userId, { name, at: Date.now() });
+  if (name) userNames.set(userId, { name, at: Date.now() });
   return name;
 }
 
@@ -741,7 +741,7 @@ async function slackChannelInfo(token: string, channelId: string): Promise<Slack
   } catch (err) {
     if (!missingScope(err)) debugLog(`conversations.info ${channelId} failed: ${err instanceof Error ? err.message : err}`);
   }
-  channelInfos.set(channelId, { info, at: Date.now() });
+  if (info) channelInfos.set(channelId, { info, at: Date.now() });
   return info;
 }
 
