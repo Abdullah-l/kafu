@@ -2,7 +2,7 @@ import { homedir, hostname } from "node:os";
 import { join, basename } from "node:path";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile, rename, rm, chmod } from "node:fs/promises";
-import { CLAUDE_EXECUTABLE, runClaudeStream, killRun, watchRunMeta } from "../runner";
+import { CLAUDE_EXECUTABLE, NO_ATTRIBUTION_ARGS, runClaudeStream, killRun, watchRunMeta } from "../runner";
 import { findSessionJsonlPath } from "../sessionFiles";
 import { AGENT_PROTOCOL_VERSION, type AgentMessage, type RunRequest, type ServerMessage } from "./protocol";
 
@@ -104,7 +104,7 @@ async function execute(config: AgentConfig, request: RunRequest, emit: (message:
   ].filter(Boolean).join("\n\n");
 
   const build = (resume?: string) => {
-    const args = [CLAUDE_EXECUTABLE, "-p", prompt, "--output-format", "stream-json", "--verbose"];
+    const args = [CLAUDE_EXECUTABLE, "-p", prompt, "--output-format", "stream-json", "--verbose", ...NO_ATTRIBUTION_ARGS];
     if (config.permissionMode === "bypassPermissions") args.push("--dangerously-skip-permissions");
     else args.push("--permission-mode", config.permissionMode);
     if (config.allowedTools.length > 0) args.push("--allowedTools", config.allowedTools.join(" "));

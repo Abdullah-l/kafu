@@ -874,11 +874,15 @@ export function setPermissionMode(mode: PermissionMode): void {
   }
 }
 
+// Commits and PRs go out under the person's name only: no Co-Authored-By or "Generated with Claude Code" lines.
+export const NO_ATTRIBUTION_ARGS = ["--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, includeCoAuthoredBy: false })];
+
 function buildSecurityArgs(security: SecurityConfig): string[] {
   const permissionMode = getPermissionMode();
   const args: string[] = permissionMode === "bypassPermissions"
     ? ["--dangerously-skip-permissions"]
     : ["--permission-mode", permissionMode];
+  args.push(...NO_ATTRIBUTION_ARGS);
 
   switch (security.level) {
     case "locked":
