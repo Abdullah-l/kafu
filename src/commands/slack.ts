@@ -128,6 +128,7 @@ onConversationDeleted((userId, conversation) => {
   const key = threadSessionKey(conversation, userId);
   threadHistoryLoaded.delete(key);
   seenThreadImages.delete(key);
+  deliveredLinks.delete(key);
 });
 const EARLIER_IMAGE_LIMIT = 3;
 const THREAD_STATE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -684,6 +685,7 @@ const SLACK_LINK_RE = /https:\/\/[a-z0-9-]+\.slack\.com\/archives\/([A-Z0-9]+)\/
 const NAME_TTL_MS = 6 * 60 * 60 * 1000;
 const userNames = new Map<string, { name: string; at: number }>();
 const channelInfos = new Map<string, { info: SlackChannelInfo | null; at: number }>();
+const deliveredLinks = new Map<string, Set<string>>();
 
 interface SlackChannelInfo {
   name?: string;
@@ -800,12 +802,15 @@ export async function fetchLinkedThreads(
   text: string,
   current: { channelId: string; threadTs: string },
   requesterId?: string,
+  delivered?: Set<string>,
 ): Promise<{ context: string; images: { path: string; user?: string }[]; files: string[] }> {
   const notes: string[] = [];
   const images: { path: string; user?: string }[] = [];
   const files: string[] = [];
   for (const link of parseSlackLinks(text)) {
     if (link.channelId === current.channelId && link.threadTs === current.threadTs) continue;
+    const key = `${link.channelId}:${link.threadTs}`;
+    if (delivered?.has(key)) continue;
     try {
       const info = await slackChannelInfo(token, link.channelId);
       const restricted = !info || info.is_private || info.is_im || info.is_mpim || /^[GD]/.test(link.channelId);
@@ -838,6 +843,7 @@ export async function fetchLinkedThreads(
       const path = join(dir, `linked-${link.channelId}-${link.threadTs}-${Date.now()}.txt`);
       await Bun.write(path, lines.join("\n") + "\n");
       files.push(path);
+      delivered?.add(key);
       notes.push(`Slack link ${link.url} (${channelLabel}, ${messages.length} message${messages.length === 1 ? "" : "s"}): full thread saved to ${path}. Read the whole file.`);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -1317,7 +1323,15 @@ async function handleMessage(event: SlackMessage): Promise<void> {
 
     let linkedThreads: { context: string; images: { path: string; user?: string }[]; files: string[] } = { context: "", images: [], files: [] };
     try {
-      linkedThreads = await fetchLinkedThreads(config.botToken, cleanText, { channelId, threadTs: replyThreadTs }, actingUserId ?? userId);
+      let linkSource = cleanText;
+      if (inThread) {
+        const history = await fetchThreadHistory(config.botToken, channelId, event.thread_ts!, 200).catch(() => []);
+        linkSource = [...history.filter((m) => m.role === "user" && m.ts !== event.ts).map((m) => m.text ?? ""), cleanText].join("\n");
+      }
+      const deliveredKey = sessionThreadId ?? `${channelId}:${replyThreadTs}`;
+      const delivered = deliveredLinks.get(deliveredKey) ?? new Set<string>();
+      deliveredLinks.set(deliveredKey, delivered);
+      linkedThreads = await fetchLinkedThreads(config.botToken, linkSource, { channelId, threadTs: replyThreadTs }, actingUserId ?? userId, delivered);
     } catch (err) {
       debugLog(`Failed to fetch linked Slack threads: ${err instanceof Error ? err.message : err}`);
     }
