@@ -51,10 +51,13 @@ async function appendLine(file: string, prefix: string, line: string): Promise<v
   await writeFile(file, `${text}${text && !text.endsWith("\n") ? "\n" : ""}${line}\n`);
 }
 
-async function ensureAccount(userId: string, uid: number): Promise<void> {
-  const name = `kafu${uid}`;
+export async function ensureNamedAccount(name: string, uid: number, home: string, comment = ""): Promise<void> {
   await appendLine("/etc/group", `${name}:`, `${name}:x:${uid}:`);
-  await appendLine("/etc/passwd", `${name}:`, `${name}:x:${uid}:${uid}:${userId}:${userHomeDir(userId)}:/bin/bash`);
+  await appendLine("/etc/passwd", `${name}:`, `${name}:x:${uid}:${uid}:${comment}:${home}:/bin/bash`);
+}
+
+async function ensureAccount(userId: string, uid: number): Promise<void> {
+  await ensureNamedAccount(`kafu${uid}`, uid, userHomeDir(userId), userId);
 }
 
 async function ensureAllAccounts(): Promise<void> {

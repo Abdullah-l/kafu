@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, realpath, rename } from "fs/promises";
 import { join, dirname, resolve, sep } from "path";
 import { isolationEnabled, runUid, prepareSandbox, sandboxCommand } from "./isolation";
+import { writeCacheToken } from "./shared-cache";
 import { execSync } from "child_process";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "fs";
 import {
@@ -1159,6 +1160,7 @@ async function execClaude(
       workDir: spawnCwd,
       readable: [...(mcpPath && mcpPath.startsWith(userDir + sep) ? [mcpPath] : []), ...(identity.readable ?? [])],
     });
+    await writeCacheToken(identity.userId, homeDir, uid);
     baseEnv.HOME = homeDir;
     if (spawnCwd) baseEnv.KAFU_WORKDIR = spawnCwd;
     baseEnv[RUN_AS_ENV] = String(uid);

@@ -284,3 +284,29 @@ describe("conversations", () => {
     });
   });
 });
+
+describe("shared cache tokens", () => {
+  let dir: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "kafu-cache-"));
+  });
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("only kafu-issued tokens identify a user", async () => {
+    const out = await runInDir(dir, `
+      const cfg = await import(${JSON.stringify(join(SRC, "config.ts"))}); await cfg.initConfig(); await cfg.loadSettings();
+      const c = await import(${JSON.stringify(join(SRC, "shared-cache.ts"))});
+      const good = await c.verifyCacheToken("UA." + (await (await import("node:crypto")).createHmac("sha256", await (await import(${JSON.stringify(join(SRC, "users.ts"))})).deriveKey("shared-cache")).update("UA").digest("base64url")));
+      const forged = await c.verifyCacheToken("UB.not-a-real-mac");
+      const swapped = await c.verifyCacheToken("UB." + (await (await import("node:crypto")).createHmac("sha256", await (await import(${JSON.stringify(join(SRC, "users.ts"))})).deriveKey("shared-cache")).update("UA").digest("base64url")));
+      const empty = await c.verifyCacheToken("");
+      const off = await c.warmSharedCache("moyasar/moyasar-api", "x");
+      console.log(JSON.stringify({ good, forged, swapped, empty, off: off.ok }));
+    `);
+    expect(JSON.parse(out.trim().split("\n").pop()!)).toEqual({ good: "UA", forged: null, swapped: null, empty: null, off: false });
+  });
+});
