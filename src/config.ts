@@ -61,7 +61,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
   slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false },
-  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
+  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], workDirTtlDays: 3, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
@@ -117,6 +117,7 @@ export interface MultiUserConfig {
   directMessages: boolean;
   portal: PortalConfig;
   protectedRepos: string[];
+  workDirTtlDays: number;
 }
 
 export type SecurityLevel =
@@ -305,6 +306,7 @@ function parseSettings(raw: Record<string, any>): Settings {
       mcpConfig: typeof raw.multiUser?.mcpConfig === "string" ? raw.multiUser.mcpConfig.trim() : "",
       credentials: parseCredentials(raw.multiUser?.credentials),
       directMessages: raw.multiUser?.directMessages !== false,
+      workDirTtlDays: Number.isFinite(raw.multiUser?.workDirTtlDays) && Number(raw.multiUser.workDirTtlDays) > 0 ? Number(raw.multiUser.workDirTtlDays) : 3,
       protectedRepos: Array.isArray(raw.multiUser?.protectedRepos)
         ? raw.multiUser.protectedRepos.filter((r: unknown): r is string => typeof r === "string" && /^[\w.-]+\/[\w.-]+$/.test(r.trim())).map((r: string) => r.trim())
         : [],
