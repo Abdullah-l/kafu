@@ -131,7 +131,6 @@
       el("span", { class: "where", text: c.channelName || c.channelId }),
       el("span", { text: when(c.updatedAt) }),
       el("span", { text: c.turnCount + (c.turnCount === 1 ? " message" : " messages") }),
-      el("span", { text: c.mode === "computer" ? "Ran on your computer" : "Ran on the server" }),
     ]);
     var head = el("button", { class: "convo-head", "aria-expanded": String(isOpen), onclick: function () { toggle(c.id); } }, [
       el("span", { class: "convo-title", text: c.title }),

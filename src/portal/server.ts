@@ -12,7 +12,6 @@ import {
 } from "../accounts";
 import { createLinkToken, redeemLinkToken, createSessionToken, sessionUser, SESSION_MAX_AGE_SECONDS } from "./auth";
 import { listConversations, getConversation, deleteConversation, deleteAllConversations, getAssistantName } from "../conversations";
-import { agentWebSocket, authenticateAgent, pairDevice, type AgentSocketData } from "../agent/relay";
 
 const PAGE_FILE = join(import.meta.dir, "page.html");
 const CONVERSATIONS_FILE = join(import.meta.dir, "conversations.html");
@@ -30,7 +29,7 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
 };
 
-let server: ReturnType<typeof Bun.serve<AgentSocketData>> | null = null;
+let server: ReturnType<typeof Bun.serve> | null = null;
 
 export function portalBaseUrl(): string {
   const { publicUrl, port } = getSettings().multiUser.portal;
@@ -76,22 +75,9 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
   }
 }
 
-async function handle(req: Request, srv: ReturnType<typeof Bun.serve<AgentSocketData>>): Promise<Response | undefined> {
+async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const title = getSettings().multiUser.portal.title;
-
-  if (url.pathname === "/agent/pair" && req.method === "POST") {
-    const body = await readJson(req);
-    const paired = await pairDevice(String(body.code ?? ""), String(body.name ?? ""));
-    return paired ? json({ ok: true, token: paired.token, userId: paired.userId }) : json({ ok: false, error: "That pairing code is invalid or expired. Ask Alem for a new one." }, 401);
-  }
-
-  if (url.pathname === "/agent") {
-    const data = await authenticateAgent(req.headers.get("authorization"));
-    if (!data) return new Response("Unauthorized", { status: 401 });
-    if (srv.upgrade(req, { data })) return undefined;
-    return new Response("Expected a WebSocket", { status: 400 });
-  }
 
   if (url.pathname === "/" ) return Response.redirect(`${url.origin}/connect`, 302);
 
@@ -186,7 +172,7 @@ async function handle(req: Request, srv: ReturnType<typeof Bun.serve<AgentSocket
 export function startPortal(): { url: string } {
   const { host, port } = getSettings().multiUser.portal;
   if (server) server.stop();
-  server = Bun.serve<AgentSocketData>({ hostname: host, port, fetch: handle, websocket: agentWebSocket });
+  server = Bun.serve({ hostname: host, port, fetch: handle });
   return { url: portalBaseUrl() };
 }
 
