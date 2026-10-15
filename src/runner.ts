@@ -1,7 +1,8 @@
 import { mkdir, readFile, writeFile, realpath, rename } from "fs/promises";
 import { join, dirname, resolve, sep } from "path";
 import { isolationEnabled, runUid, prepareSandbox, sandboxCommand } from "./isolation";
-import { writeCacheToken } from "./shared-cache";
+import { writeRunToken } from "./run-token";
+import { slackMcpServerEntry } from "./slack-tools";
 import { execSync } from "child_process";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "fs";
 import {
@@ -105,17 +106,20 @@ async function identityMcpConfig(identity: RunIdentity): Promise<{ path: string 
   const specs = getSettings().multiUser.credentials;
   const missingSpecs = specs.filter((spec) => !identity.secrets[spec.id]);
   const sharedPath = sharedMcpConfigPath();
-  if (!sharedPath) return { path: null, missing: missingSpecs.map((s) => s.id) };
-  if (specs.length === 0) return { path: sharedPath, missing: [] };
+  const builtIn = isolationEnabled() && getSettings().slack.botToken ? { slack: slackMcpServerEntry() } : {};
+  if (!sharedPath && Object.keys(builtIn).length === 0) return { path: null, missing: missingSpecs.map((s) => s.id) };
+  if (specs.length === 0 && Object.keys(builtIn).length === 0) return { path: sharedPath, missing: [] };
 
-  let shared: McpConfigFile;
-  try {
-    shared = JSON.parse(await readFile(sharedPath, "utf8")) as McpConfigFile;
-  } catch (err) {
-    console.error(`[${new Date().toLocaleTimeString()}] Failed to read shared MCP config ${sharedPath}:`, err);
-    return { path: null, missing: missingSpecs.map((s) => s.id) };
+  let shared: McpConfigFile = { mcpServers: {} };
+  if (sharedPath) {
+    try {
+      shared = JSON.parse(await readFile(sharedPath, "utf8")) as McpConfigFile;
+    } catch (err) {
+      console.error(`[${new Date().toLocaleTimeString()}] Failed to read shared MCP config ${sharedPath}:`, err);
+    }
   }
   const { config } = filterMcpConfig(shared, new Set(missingSpecs.map((s) => s.env)));
+  config.mcpServers = { ...(config.mcpServers ?? {}), ...builtIn };
   const target = join(dirname(identity.configDir), "mcp.json");
   const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
@@ -1160,7 +1164,7 @@ async function execClaude(
       workDir: spawnCwd,
       readable: [...(mcpPath && mcpPath.startsWith(userDir + sep) ? [mcpPath] : []), ...(identity.readable ?? [])],
     });
-    await writeCacheToken(identity.userId, homeDir, uid);
+    await writeRunToken(identity.userId, homeDir, uid);
     baseEnv.HOME = homeDir;
     if (spawnCwd) baseEnv.KAFU_WORKDIR = spawnCwd;
     baseEnv[RUN_AS_ENV] = String(uid);
