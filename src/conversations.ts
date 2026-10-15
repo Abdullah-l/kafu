@@ -7,7 +7,6 @@ import { userConfigDir, userScratchDir } from "./users";
 import { peekThreadSession, removeThreadSession } from "./sessionManager";
 import { resetFallbackSession } from "./sessions";
 import { agentDirKey } from "./runner";
-import { forgetOnAgents } from "./agent/relay";
 
 export type TurnStatus = "ok" | "error" | "stopped";
 export type RunMode = "server" | "computer";
@@ -218,7 +217,6 @@ async function forgetThread(userId: string, conversation: Conversation): Promise
   }
   await resetFallbackSession(undefined, key);
   await removeWorkDir(userId, conversation);
-  forgetOnAgents(userId, key);
   for (const listener of deleteListeners) {
     try { listener(userId, conversation); } catch {}
   }

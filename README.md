@@ -5,7 +5,7 @@ Kafu (كفو, "dependable") runs Claude Code as a daemon you talk to from Slack,
 ## Features
 
 - **Slack** over Socket Mode: DMs, @mentions, per-thread sessions, live progress message with a Stop button, file uploads, reactions
-- **Teams** (opt-in): one Slack bot for a whole team; each person's requests run on their own computer through a small agent, or on the server with their own credentials
+- **Teams** (opt-in): one Slack bot for a whole team; each person's requests run on the server with their own Claude account and credentials
 - **Telegram**: DMs and groups, voice transcription (whisper.cpp), images, per-chat model switching
 - **Web UI**: chat, session history, usage, runtime info
 - **Models**: Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 4.5, or any Claude model ID; optional fallback model and keyword-based routing
@@ -79,39 +79,21 @@ Turn on multi-user mode to share one Slack bot across a team. Every request runs
 
 `allowedUserIds: ["*"]` lets anyone in the workspace use it; list member IDs to restrict it. Runs are fully parallel across people and threads; if two people talk in one thread, each gets their own session seeded with the thread history. Only the person who started a run can stop it.
 
-### Recommended: run on each person's own computer
+### How runs work
 
-The server keeps the Slack connection and routing. The work runs in the official `claude` on the person's machine, with their own Claude login, MCP servers, repos, git and SSO sessions. The server stores nobody's credentials.
-
-```bash
-bun install -g github:Abdullah-l/kafu
-kafu agent pair <server-url> <code>   # mention the bot with `pair` in Slack to get this command
-kafu agent                            # keep it running
-kafu agent status                     # pairing, Claude, gh and MCP status
-```
-
-- The agent connects out to the server (`/agent` WebSocket on the portal port); nothing listens on the laptop.
-- Pairing codes work once and expire in 10 minutes. The device token is stored in `~/.kafu/agent.json` (`KAFU_AGENT_HOME` overrides the folder). `unpair` in Slack revokes it; `status` shows whether your computer is connected.
-- `~/.kafu/agent.json` also sets `workspace` (where Claude runs, default your home folder), `permissionMode` (default `bypassPermissions`; use `acceptEdits` plus `allowedTools` to restrict) and `allowedTools`.
-- If someone is paired but their computer is offline, the bot tells them instead of running anything.
-- Slack attachments travel with the request; live progress and the Stop button work the same.
-- Update with the same `bun install -g` command.
-
-### Alternative: run on the server
-
-People who haven't paired a computer run on the server, each with their own Claude config folder, sessions and stored credentials. Use this with Claude Team/Enterprise or API-key setups; check that your plan's terms allow it before sharing personal subscriptions this way.
+Everyone's requests run on the server, each with their own Claude config folder, sessions and stored credentials. Use this with Claude Team/Enterprise or API-key setups; check that your plan's terms allow it before sharing personal subscriptions this way.
 
 - Connections page (`multiUser.portal`): Slack hands each person a private one-time link to a page where they sign in with Claude (the official `claude setup-token` flow), connect GitHub through a device code, paste other service tokens, see their status and pick a model. `linkNote` (Slack mrkdwn) is added to the message that carries the link, for things like "turn on your VPN first". The page also has a Conversations tab listing each person's threads with links back to Slack and delete. Without the portal, the same setup works through DM commands: `login`, `logout`, `whoami`, `model`, `connect`, `connect <service>`, `disconnect <service>`.
 - Per-person service credentials: list them in `multiUser.credentials` (`id`, `label`, `env`, `help`, optional `pattern`; `"method": "github"` with optional `scopes` for the device sign-in). Each value is stored encrypted and exported as `env` only for that person's runs. Shared MCP servers in `multiUser.mcpConfig` (default `.mcp.json`) that reference `${ENV}` for a credential the person hasn't connected are left out of their session.
 - Tokens are encrypted with `KAFU_SECRET_KEY` (32 bytes, base64), or a key generated at `.claude/kafu/secret.key`.
 - Run kafu as root (in a container) and each person's server runs get their own OS user (`setpriv`, no capabilities, `no_new_privs`), with private config, home and work folders. Runs can't read each other's files, transcripts or process environments, and can't touch kafu's own state. As a normal user, everyone's runs share that one user.
 - On start, kafu as root locks the workspace: the workspace root, `agents/`, `.claude/` and top-level symlinks (like a shared `CLAUDE.md`) become root-owned, and stray `CLAUDE.md`/`.claude` files in shared spots are removed. Before every run it strips instruction files (`CLAUDE.md`, `rules`, `skills`, `settings.json`, auto memory…) from that person's config, home and work folders, so nobody can plant instructions for later runs.
-- `multiUser.protectedRepos` (e.g. `["owner/kafu"]`): a root-owned managed-settings hook (`/etc/claude-code/managed-settings.json`, `allowManagedHooksOnly`) blocks pushes, PRs and GitHub calls for those repos, including from inside a checkout of them, and blocks edits to instruction files. Paired laptops get the same hook through `--settings`.
+- `multiUser.protectedRepos` (e.g. `["owner/kafu"]`): a root-owned managed-settings hook (`/etc/claude-code/managed-settings.json`, `allowManagedHooksOnly`) blocks pushes, PRs and GitHub calls for those repos, including from inside a checkout of them, and blocks edits to instruction files.
 
 ### Slack settings for teams
 
 - `multiUser.directMessages: false`: the bot answers DMs only with a private pointer to channels and the connections page. Also untick "Allow users to send messages" under App Home in the Slack app.
-- The connections page and the agent endpoint are plain HTTP on the portal port. Keep that port on a private network or put it behind HTTPS.
+- The connections page is plain HTTP on the portal port. Keep that port on a private network or put it behind HTTPS.
 
 ## CLI
 

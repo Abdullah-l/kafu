@@ -17,7 +17,6 @@ export function getAgentsDir(): string {
   return join(process.cwd(), "agents");
 }
 
-export const DEFAULT_AGENT_INSTALL = "bun install -g github:Abdullah-l/kafu";
 
 const DEFAULT_SETTINGS: Settings = {
   model: "",
@@ -62,7 +61,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
   slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false },
-  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", agentInstall: DEFAULT_AGENT_INSTALL, linkNote: "" } },
+  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
@@ -108,7 +107,6 @@ export interface PortalConfig {
   port: number;
   publicUrl: string;
   title: string;
-  agentInstall: string;
   linkNote: string;
 }
 
@@ -316,7 +314,6 @@ function parseSettings(raw: Record<string, any>): Settings {
         port: Number.isFinite(raw.multiUser?.portal?.port) ? Number(raw.multiUser.portal.port) : 4650,
         publicUrl: typeof raw.multiUser?.portal?.publicUrl === "string" ? raw.multiUser.portal.publicUrl.trim().replace(/\/+$/, "") : "",
         title: typeof raw.multiUser?.portal?.title === "string" && raw.multiUser.portal.title.trim() ? raw.multiUser.portal.title.trim() : "Connections",
-        agentInstall: typeof raw.multiUser?.portal?.agentInstall === "string" && raw.multiUser.portal.agentInstall.trim() ? raw.multiUser.portal.agentInstall.trim() : DEFAULT_AGENT_INSTALL,
         linkNote: typeof raw.multiUser?.portal?.linkNote === "string" ? raw.multiUser.portal.linkNote.trim() : "",
       },
     },
