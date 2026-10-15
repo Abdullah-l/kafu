@@ -285,11 +285,11 @@ describe("conversations", () => {
   });
 });
 
-describe("shared cache tokens", () => {
+describe("run tokens", () => {
   let dir: string;
 
   beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), "kafu-cache-"));
+    dir = mkdtempSync(join(tmpdir(), "kafu-token-"));
   });
 
   afterAll(() => {
@@ -299,11 +299,13 @@ describe("shared cache tokens", () => {
   test("only kafu-issued tokens identify a user", async () => {
     const out = await runInDir(dir, `
       const cfg = await import(${JSON.stringify(join(SRC, "config.ts"))}); await cfg.initConfig(); await cfg.loadSettings();
+      const t = await import(${JSON.stringify(join(SRC, "run-token.ts"))});
       const c = await import(${JSON.stringify(join(SRC, "shared-cache.ts"))});
-      const good = await c.verifyCacheToken("UA." + (await (await import("node:crypto")).createHmac("sha256", await (await import(${JSON.stringify(join(SRC, "users.ts"))})).deriveKey("shared-cache")).update("UA").digest("base64url")));
-      const forged = await c.verifyCacheToken("UB.not-a-real-mac");
-      const swapped = await c.verifyCacheToken("UB." + (await (await import("node:crypto")).createHmac("sha256", await (await import(${JSON.stringify(join(SRC, "users.ts"))})).deriveKey("shared-cache")).update("UA").digest("base64url")));
-      const empty = await c.verifyCacheToken("");
+      const ua = await t.runToken("UA");
+      const good = await t.verifyRunToken(ua);
+      const forged = await t.verifyRunToken("UB.not-a-real-mac");
+      const swapped = await t.verifyRunToken("UB." + ua.split(".").pop());
+      const empty = await t.verifyRunToken("");
       const off = await c.warmSharedCache("moyasar/moyasar-api", "x");
       console.log(JSON.stringify({ good, forged, swapped, empty, off: off.ok }));
     `);

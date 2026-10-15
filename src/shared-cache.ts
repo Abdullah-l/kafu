@@ -1,12 +1,10 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { chmod, chown, mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, chown, mkdir, rm } from "node:fs/promises";
 import { getSettings, type SharedCacheConfig } from "./config";
-import { deriveKey, getUser } from "./users";
+import { getUser } from "./users";
+import { verifyRunToken } from "./run-token";
 import { ensureNamedAccount, isolationEnabled, sandboxCommand } from "./isolation";
 
 export const CACHE_SOCKET = "/run/kafu-cache.sock";
-const TOKEN_FILE = ".kafu-cache-token";
 const OUTPUT_LIMIT = 20_000;
 
 interface WarmResult {
@@ -21,26 +19,6 @@ let queue: Promise<unknown> = Promise.resolve();
 function config(): SharedCacheConfig | null {
   const cfg = getSettings().multiUser.sharedCache;
   return cfg && cfg.command && cfg.dir ? cfg : null;
-}
-
-async function mac(userId: string): Promise<string> {
-  return createHmac("sha256", await deriveKey("shared-cache")).update(userId).digest("base64url");
-}
-
-export async function verifyCacheToken(token: string): Promise<string | null> {
-  const dot = token.lastIndexOf(".");
-  if (dot <= 0) return null;
-  const userId = token.slice(0, dot);
-  const given = Buffer.from(token.slice(dot + 1));
-  const expected = Buffer.from(await mac(userId));
-  return given.length === expected.length && timingSafeEqual(given, expected) ? userId : null;
-}
-
-export async function writeCacheToken(userId: string, homeDir: string, uid: number): Promise<void> {
-  if (!config()) return;
-  const path = join(homeDir, TOKEN_FILE);
-  await writeFile(path, `${userId}.${await mac(userId)}\n`, { mode: 0o600 });
-  await chown(path, uid, uid);
 }
 
 async function runWarm(cfg: SharedCacheConfig, repo: string, ghToken: string): Promise<WarmResult> {
@@ -94,7 +72,7 @@ async function handleRequest(line: string): Promise<WarmResult> {
   } catch {
     return { ok: false, message: "bad request" };
   }
-  const userId = typeof request.token === "string" ? await verifyCacheToken(request.token.trim()) : null;
+  const userId = typeof request.token === "string" ? await verifyRunToken(request.token.trim()) : null;
   if (!userId) return { ok: false, message: "not authorized" };
   const repo = typeof request.repo === "string" ? request.repo.trim() : "";
   const ghToken = (await getUser(userId))?.secrets.github;
