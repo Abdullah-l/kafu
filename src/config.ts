@@ -61,7 +61,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
   slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false },
-  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], workDirTtlDays: 3, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
+  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], workDirTtlDays: 3, sharedCache: null, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
@@ -110,6 +110,28 @@ export interface PortalConfig {
   linkNote: string;
 }
 
+export interface SharedCacheConfig {
+  command: string;
+  dir: string;
+  uid: number;
+  repoPattern: string;
+  minIntervalMinutes: number;
+  timeoutMinutes: number;
+}
+
+function parseSharedCache(raw: any): SharedCacheConfig | null {
+  if (!raw || typeof raw.command !== "string" || !raw.command.trim() || typeof raw.dir !== "string" || !raw.dir.trim()) return null;
+  const uid = Number(raw.uid);
+  return {
+    command: raw.command.trim(),
+    dir: raw.dir.trim(),
+    uid: Number.isInteger(uid) && uid >= 1000 && uid < 20000 ? uid : 19999,
+    repoPattern: typeof raw.repoPattern === "string" && raw.repoPattern ? raw.repoPattern : "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+    minIntervalMinutes: Number.isFinite(raw.minIntervalMinutes) && raw.minIntervalMinutes >= 0 ? Number(raw.minIntervalMinutes) : 60,
+    timeoutMinutes: Number.isFinite(raw.timeoutMinutes) && raw.timeoutMinutes > 0 ? Number(raw.timeoutMinutes) : 30,
+  };
+}
+
 export interface MultiUserConfig {
   enabled: boolean;
   mcpConfig: string;
@@ -118,6 +140,7 @@ export interface MultiUserConfig {
   portal: PortalConfig;
   protectedRepos: string[];
   workDirTtlDays: number;
+  sharedCache: SharedCacheConfig | null;
 }
 
 export type SecurityLevel =
@@ -306,6 +329,7 @@ function parseSettings(raw: Record<string, any>): Settings {
       mcpConfig: typeof raw.multiUser?.mcpConfig === "string" ? raw.multiUser.mcpConfig.trim() : "",
       credentials: parseCredentials(raw.multiUser?.credentials),
       directMessages: raw.multiUser?.directMessages !== false,
+      sharedCache: parseSharedCache(raw.multiUser?.sharedCache),
       workDirTtlDays: Number.isFinite(raw.multiUser?.workDirTtlDays) && Number(raw.multiUser.workDirTtlDays) > 0 ? Number(raw.multiUser.workDirTtlDays) : 3,
       protectedRepos: Array.isArray(raw.multiUser?.protectedRepos)
         ? raw.multiUser.protectedRepos.filter((r: unknown): r is string => typeof r === "string" && /^[\w.-]+\/[\w.-]+$/.test(r.trim())).map((r: string) => r.trim())

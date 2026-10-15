@@ -12,6 +12,7 @@ import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wi
 import { PluginManager, setPluginManager } from "../plugins";
 import { startPortal, stopPortal } from "../portal/server";
 import { isolationEnabled, hardenWorkspace, writeManagedSettings, pruneWorkDirs } from "../isolation";
+import { startSharedCache } from "../shared-cache";
 
 const CLAUDE_DIR = join(process.cwd(), ".claude");
 const STATUSLINE_FILE = join(CLAUDE_DIR, "statusline.cjs");
@@ -358,6 +359,9 @@ export async function start(args: string[] = []) {
       };
       await prune();
       setInterval(() => { void prune(); }, 6 * 60 * 60 * 1000);
+      if (await startSharedCache().catch((err) => { console.error(`[${ts()}] Shared cache failed to start:`, err); return false; })) {
+        console.log(`[${ts()}] Shared cache: listening for warm requests`);
+      }
       console.log(`[${ts()}] Isolation: each person's runs use their own OS user; ${currentSettings.multiUser.protectedRepos.length} protected repo(s)`);
     } else {
       console.warn(`[${ts()}] Isolation: off (kafu isn't running as root), so everyone's runs share one OS user`);
