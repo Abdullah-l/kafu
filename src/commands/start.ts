@@ -5,13 +5,13 @@ import { fileURLToPath } from "url";
 import { run, runUserMessage, streamUserMessage, bootstrap, ensureProjectClaudeMd } from "../runner";
 import { writeState, type StateData } from "../statusline";
 import { writePidFile, cleanupPidFile, checkExistingDaemon } from "../pid";
-import { initConfig, loadSettings, reloadSettings, type Settings } from "../config";
+import { initConfig, loadSettings, reloadSettings, getSettings, type Settings } from "../config";
 import { startWebUi, type WebServerHandle } from "../web";
 import { getOrCreateWebToken } from "../ui/auth";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { PluginManager, setPluginManager } from "../plugins";
 import { startPortal, stopPortal } from "../portal/server";
-import { isolationEnabled, hardenWorkspace, writeManagedSettings } from "../isolation";
+import { isolationEnabled, hardenWorkspace, writeManagedSettings, pruneWorkDirs } from "../isolation";
 
 const CLAUDE_DIR = join(process.cwd(), ".claude");
 const STATUSLINE_FILE = join(CLAUDE_DIR, "statusline.cjs");
@@ -352,6 +352,12 @@ export async function start(args: string[] = []) {
     if (isolationEnabled()) {
       await hardenWorkspace();
       await writeManagedSettings(currentSettings.multiUser.protectedRepos);
+      const prune = async () => {
+        const removed = await pruneWorkDirs(getSettings().multiUser.workDirTtlDays).catch(() => 0);
+        if (removed) console.log(`[${ts()}] Removed ${removed} work folder${removed === 1 ? "" : "s"} unused for ${getSettings().multiUser.workDirTtlDays}+ days`);
+      };
+      await prune();
+      setInterval(() => { void prune(); }, 6 * 60 * 60 * 1000);
       console.log(`[${ts()}] Isolation: each person's runs use their own OS user; ${currentSettings.multiUser.protectedRepos.length} protected repo(s)`);
     } else {
       console.warn(`[${ts()}] Isolation: off (kafu isn't running as root), so everyone's runs share one OS user`);

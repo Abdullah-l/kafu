@@ -1,5 +1,5 @@
 import { existsSync, lstatSync } from "node:fs";
-import { chmod, chown, lstat, mkdir, readFile, readdir, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, chown, lstat, mkdir, readFile, readdir, readlink, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getSettings } from "./config";
 
@@ -22,16 +22,72 @@ export async function runUid(userId: string): Promise<number> {
     try {
       map = JSON.parse(await readFile(UID_FILE, "utf8")) as Record<string, number>;
     } catch {}
-    if (map[userId]) return map[userId];
+    if (map[userId]) {
+      await ensureAccount(userId, map[userId]);
+      return map[userId];
+    }
     const uid = Math.max(FIRST_UID - 1, ...Object.values(map)) + 1;
     map[userId] = uid;
     await mkdir(KAFU_DIR, { recursive: true });
     await writeFile(`${UID_FILE}.tmp`, JSON.stringify(map, null, 2) + "\n", { mode: 0o600 });
     await rename(`${UID_FILE}.tmp`, UID_FILE);
+    await ensureAccount(userId, uid);
     return uid;
   });
   uidLock = next.catch(() => {});
   return next;
+}
+
+export function userHomeDir(userId: string): string {
+  return join(KAFU_DIR, "users", userId, "home");
+}
+
+async function appendLine(file: string, prefix: string, line: string): Promise<void> {
+  let text = "";
+  try {
+    text = await readFile(file, "utf8");
+  } catch {}
+  if (text.split("\n").some((l) => l.startsWith(prefix))) return;
+  await writeFile(file, `${text}${text && !text.endsWith("\n") ? "\n" : ""}${line}\n`);
+}
+
+async function ensureAccount(userId: string, uid: number): Promise<void> {
+  const name = `kafu${uid}`;
+  await appendLine("/etc/group", `${name}:`, `${name}:x:${uid}:`);
+  await appendLine("/etc/passwd", `${name}:`, `${name}:x:${uid}:${uid}:${userId}:${userHomeDir(userId)}:/bin/bash`);
+}
+
+async function ensureAllAccounts(): Promise<void> {
+  let map: Record<string, number> = {};
+  try {
+    map = JSON.parse(await readFile(UID_FILE, "utf8")) as Record<string, number>;
+  } catch {
+    return;
+  }
+  for (const [userId, uid] of Object.entries(map)) await ensureAccount(userId, uid);
+}
+
+export async function pruneWorkDirs(maxAgeDays: number): Promise<number> {
+  const root = join(PROJECT_DIR, "agents");
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  let removed = 0;
+  let entries: string[] = [];
+  try {
+    entries = await readdir(root);
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const path = join(root, entry);
+    try {
+      const stat = await lstat(path);
+      if (stat.uid < FIRST_UID || stat.mtimeMs < cutoff) {
+        await rm(path, { recursive: true, force: true });
+        removed++;
+      }
+    } catch {}
+  }
+  return removed;
 }
 
 async function chownTree(path: string, uid: number): Promise<void> {
@@ -109,6 +165,8 @@ export async function prepareSandbox(opts: {
   await stripMemory(join(opts.homeDir, ".claude"));
   if (opts.workDir) {
     await ownedDir(opts.workDir, opts.uid);
+    const now = new Date();
+    await utimes(opts.workDir, now, now).catch(() => {});
     await stripMemory(opts.workDir);
     await rm(join(opts.workDir, ".claude"), { recursive: true, force: true });
     await chownTree(opts.workDir, opts.uid);
@@ -144,6 +202,7 @@ async function rootSymlink(path: string, target: string): Promise<void> {
 
 export async function hardenWorkspace(): Promise<void> {
   process.umask(0o077);
+  await ensureAllAccounts();
   await rootOnly(PROJECT_DIR, 0o755);
   for (const entry of await readdir(PROJECT_DIR)) {
     const path = join(PROJECT_DIR, entry);
