@@ -42,7 +42,8 @@ async function callTool(name: string, args: Record<string, any>): Promise<{ ok: 
     const result = await callBroker(name, args);
     if (!result.ok) return result;
     const file = result.result as { name: string; mimetype: string; content_base64: string };
-    const target = resolve(String(args.save_as || `slack-files/${basename(file.name || String(args.file_id))}`));
+    const fallback = `${process.env.TMPDIR || "."}/slack-files/${basename(file.name || String(args.file_id))}`;
+    const target = resolve(String(args.save_as || fallback));
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, Buffer.from(file.content_base64, "base64"));
     return { ok: true, result: { saved_to: target, name: file.name, mimetype: file.mimetype } };

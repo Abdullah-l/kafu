@@ -61,7 +61,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
   slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false },
-  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], workDirTtlDays: 3, sharedCache: null, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
+  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], tempFileTtlDays: 14, sharedCache: null, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
@@ -139,7 +139,7 @@ export interface MultiUserConfig {
   directMessages: boolean;
   portal: PortalConfig;
   protectedRepos: string[];
-  workDirTtlDays: number;
+  tempFileTtlDays: number;
   sharedCache: SharedCacheConfig | null;
 }
 
@@ -330,7 +330,7 @@ function parseSettings(raw: Record<string, any>): Settings {
       credentials: parseCredentials(raw.multiUser?.credentials),
       directMessages: raw.multiUser?.directMessages !== false,
       sharedCache: parseSharedCache(raw.multiUser?.sharedCache),
-      workDirTtlDays: Number.isFinite(raw.multiUser?.workDirTtlDays) && Number(raw.multiUser.workDirTtlDays) > 0 ? Number(raw.multiUser.workDirTtlDays) : 3,
+      tempFileTtlDays: Number.isFinite(raw.multiUser?.tempFileTtlDays) && Number(raw.multiUser.tempFileTtlDays) > 0 ? Number(raw.multiUser.tempFileTtlDays) : 14,
       protectedRepos: Array.isArray(raw.multiUser?.protectedRepos)
         ? raw.multiUser.protectedRepos.filter((r: unknown): r is string => typeof r === "string" && /^[\w.-]+\/[\w.-]+$/.test(r.trim())).map((r: string) => r.trim())
         : [],

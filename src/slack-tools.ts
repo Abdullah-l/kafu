@@ -372,7 +372,7 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
     },
   },
   slack_download_file: {
-    description: "Download a file shared in Slack (by file ID, from slack_read_messages) into your working directory. Only files in conversations you can see.",
+    description: "Download a file shared in Slack (by file ID, from slack_read_messages) into your temp folder ($TMPDIR/slack-files, kept for 2 weeks), or save_as a path. Only files in conversations you can see.",
     schema: { type: "object", properties: { file_id: { type: "string" }, save_as: { type: "string" } }, required: ["file_id"] },
     handler: async (args, requester) => {
       const file = (await slackGet<{ file: any }>("files.info", { file: String(args.file_id) })).file;

@@ -312,3 +312,57 @@ describe("run tokens", () => {
     expect(JSON.parse(out.trim().split("\n").pop()!)).toEqual({ good: "UA", forged: null, swapped: null, empty: null, off: false });
   });
 });
+
+describe("temporary file cleanup", () => {
+  test("removes files and work folders older than the TTL and keeps everything else", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kafu-prune-"));
+    const out = await runInDir(dir, `
+      const fs = await import("node:fs");
+      const old = new Date(Date.now() - 20 * 86400000);
+      const mk = (p, body = "x", stale = false) => { fs.mkdirSync(p.split("/").slice(0, -1).join("/"), { recursive: true }); fs.writeFileSync(p, body); if (stale) fs.utimesSync(p, old, old); };
+      mk("agents/slack-c1-u1-old/repo/file.rb", "x", true); fs.utimesSync("agents/slack-c1-u1-old", old, old);
+      mk("agents/slack-c1-u1-new/repo/file.rb");
+      mk(".claude/kafu/inbox/slack/old.png", "x", true);
+      mk(".claude/kafu/inbox/slack/new.png");
+      mk(".claude/kafu/logs/slack-U1-old.log", "x", true);
+      mk(".claude/kafu/users/U1/tmp/report.csv", "a,b", true);
+      mk(".claude/kafu/users/U1/tmp/fresh.csv", "a,b");
+      mk(".claude/kafu/users/U1/home/.gem/ruby/3.4.5/gems/rails/x.rb", "x", true);
+      mk(".claude/kafu/users/U1/home/.alem-services/pg/base/1", "x", true);
+      mk(".claude/kafu/users/U1/claude/projects/p/old-session.jsonl", "{}", true);
+      mk(".claude/kafu/users/U1/claude/projects/p/new-session.jsonl", "{}");
+      const iso = await import(${JSON.stringify(join(SRC, "isolation.ts"))});
+      const stat = fs.statSync("agents/slack-c1-u1-new");
+      const report = await iso.pruneTemporaryFiles(14);
+      const exists = (p) => fs.existsSync(p);
+      console.log(JSON.stringify({
+        workDirs: report.workDirs,
+        oldWork: exists("agents/slack-c1-u1-old"),
+        newWork: exists("agents/slack-c1-u1-new") || stat.uid < 20000,
+        oldInbox: exists(".claude/kafu/inbox/slack/old.png"),
+        newInbox: exists(".claude/kafu/inbox/slack/new.png"),
+        oldLog: exists(".claude/kafu/logs/slack-U1-old.log"),
+        oldTmp: exists(".claude/kafu/users/U1/tmp/report.csv"),
+        freshTmp: exists(".claude/kafu/users/U1/tmp/fresh.csv"),
+        gems: exists(".claude/kafu/users/U1/home/.gem/ruby/3.4.5/gems/rails/x.rb"),
+        testDb: exists(".claude/kafu/users/U1/home/.alem-services/pg/base/1"),
+        oldTranscript: exists(".claude/kafu/users/U1/claude/projects/p/old-session.jsonl"),
+        newTranscript: exists(".claude/kafu/users/U1/claude/projects/p/new-session.jsonl"),
+      }));
+    `);
+    expect(JSON.parse(out.trim().split("\n").pop()!)).toEqual({
+      workDirs: 2,
+      oldWork: false,
+      newWork: true,
+      oldInbox: false,
+      newInbox: true,
+      oldLog: false,
+      oldTmp: false,
+      freshTmp: true,
+      gems: true,
+      testDb: true,
+      oldTranscript: false,
+      newTranscript: true,
+    });
+  });
+});
