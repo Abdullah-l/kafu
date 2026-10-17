@@ -373,7 +373,8 @@ export async function start(args: string[] = []) {
         ensurePrCardPoller();
         ensureScheduler();
       }
-      console.log(`[${ts()}] Isolation: each person's runs use their own OS user; ${currentSettings.multiUser.protectedRepos.length} protected repo(s)`);
+      const { namespacesAvailable } = await import("../isolation");
+      console.log(`[${ts()}] Isolation: each person's runs use their own OS user${namespacesAvailable() ? " in their own process namespace" : " (no process namespaces: add the SYS_ADMIN capability to hide other runs)"}; ${currentSettings.multiUser.protectedRepos.length} protected repo(s)`);
     } else {
       console.warn(`[${ts()}] Isolation: off (kafu isn't running as root), so everyone's runs share one OS user`);
     }

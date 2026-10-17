@@ -481,8 +481,15 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
 export async function runTool(name: string, args: Record<string, any>, requester: string): Promise<ToolResult> {
   const tool = TOOLS[name];
   if (!tool) return { ok: false, error: `unknown tool ${name}` };
+  const writes = /post|upload|update|delete|reaction|schedule_|pr_card/.test(name);
   try {
-    return { ok: true, result: await tool.handler(args ?? {}, requester) };
+    const result = await tool.handler(args ?? {}, requester);
+    if (writes) {
+      const { audit } = await import("./audit");
+      const { content_base64: _c, ...shown } = args ?? {};
+      await audit(requester, "slack-tools", "tool", `${name} ${JSON.stringify(shown).slice(0, 1500)}`);
+    }
+    return { ok: true, result };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }

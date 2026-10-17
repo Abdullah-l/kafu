@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { watchRunMeta, type RunMeta } from "../runner";
 import { TaskStream } from "../slack-stream";
 import { rememberActionToken } from "../slack-tools";
+import { audit } from "../audit";
 import { PR_ACTION_PREFIX, handlePrCardAction } from "../pr-cards";
 import { modelLabel } from "../models";
 import { ensureProjectClaudeMd, runUserMessage, compactCurrentSession, agentDirKey, killRun, consumeUserStopped } from "../runner";
@@ -1608,7 +1609,10 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     const progressTimer = progressTs
       ? setInterval(() => { void flushProgress(); }, STREAM_UPDATE_INTERVAL_MS)
       : null;
+    const auditWhere = `${channelId}/${replyThreadTs}`;
+    if (actingUserId) void audit(actingUserId, auditWhere, "request", cleanText);
     const onToolEvent = (line: string) => {
+      if (actingUserId) void audit(actingUserId, auditWhere, "tool", line);
       stream?.push(line);
       const clean = line.replace(/\s+/g, " ").trim().slice(0, PROGRESS_LINE_MAX);
       if (clean) { activity.push(clean); progressDirty = true; }
