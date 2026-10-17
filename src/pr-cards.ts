@@ -187,9 +187,11 @@ export async function postPrCard(owner: string, prUrl: string, channel: string, 
   if (getSettings().multiUser.protectedRepos.some((r) => r.toLowerCase() === parsed.repo.toLowerCase())) throw new Error(`${parsed.repo} is protected`);
   const summary = await fetchPrSummary(await githubToken(owner), parsed.repo, parsed.number);
   const id = `${parsed.repo}#${parsed.number}@${channel}:${Date.now().toString(36)}`;
+  const username = await (await import("./slack-tools")).postingName(owner).catch(() => undefined);
   const sent = await slack("chat.postMessage", {
     channel,
     text: `${summary.title} (${summary.repo}#${summary.number})`,
+    ...(username ? { username } : {}),
     blocks: cardBlocks(summary, id),
     unfurl_links: false,
     ...(threadTs ? { thread_ts: threadTs } : {}),

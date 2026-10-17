@@ -50,6 +50,14 @@ export function rememberActionToken(userId: string, token: string): void {
 }
 const posted = new Map<string, string>();
 
+export async function postingName(requester: string): Promise<string | undefined> {
+  const full = await nameOf(requester).catch(() => "");
+  const first = full.trim().split(/\s+/)[0];
+  if (!first) return undefined;
+  const { getAssistantName } = await import("./conversations");
+  return `${getAssistantName() || "Assistant"} for ${first}`.slice(0, 80);
+}
+
 function token(): string {
   const t = getSettings().slack.botToken;
   if (!t) throw new Error("Slack isn't configured");
@@ -293,9 +301,11 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
       if (!text) throw new Error("text is required");
       const channel = await resolveChannel(args.channel, requester, true);
       checkWriteBudget(requester);
+      const username = await postingName(requester);
       const sent = await slackPost<{ channel: string; ts: string }>("chat.postMessage", {
         channel: channel.id,
         text,
+        ...(username ? { username } : {}),
         ...(args.thread_ts ? { thread_ts: String(args.thread_ts), reply_broadcast: !!args.reply_broadcast } : {}),
         unfurl_links: false,
       });

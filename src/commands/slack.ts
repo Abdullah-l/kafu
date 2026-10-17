@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { watchRunMeta, type RunMeta } from "../runner";
 import { TaskStream } from "../slack-stream";
 import { rememberActionToken } from "../slack-tools";
@@ -13,7 +14,7 @@ import { resolveSkillPrompt } from "../skills";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { getRunIdentity, type RunIdentity } from "../users";
 import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, CONNECT_ACTION_PREFIX, LINK_ACTION_ID, type AccountIO } from "./slack-accounts";
-import { recordTurn, setAssistantName, onConversationDeleted, threadSessionKey, type TurnStatus } from "../conversations";
+import { recordTurn, getAssistantName, setAssistantName, onConversationDeleted, threadSessionKey, type TurnStatus } from "../conversations";
 import { mkdir, realpath, rename } from "node:fs/promises";
 import { dirname, extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
@@ -180,11 +181,29 @@ function debugLog(message: string): void {
   console.log(`[Slack][debug] ${message}`);
 }
 
+const postingAs = new AsyncLocalStorage<{ username?: string }>();
+
+function requesterDisplayName(fullName: string): string {
+  const first = fullName.trim().split(/\s+/)[0] ?? "";
+  const bot = getAssistantName() || "Assistant";
+  return first ? `${bot} for ${first}`.slice(0, 80) : bot;
+}
+
+async function postAsRequester(token: string, userId: string | undefined): Promise<string | undefined> {
+  const store = postingAs.getStore();
+  if (!store || !userId || !isMultiUser()) return undefined;
+  const name = await slackUserName(token, userId);
+  if (name) store.username = requesterDisplayName(name);
+  return store.username;
+}
+
 async function slackApi<T = Record<string, unknown>>(
   token: string,
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<T> {
+  const as = postingAs.getStore()?.username;
+  if (as && method === "chat.postMessage" && params.username === undefined) params = { ...params, username: as };
   const res = await fetch(`${SLACK_API}/${method}`, {
     method: "POST",
     headers: {
@@ -1556,8 +1575,9 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     const activity: string[] = [];
     const startedAt = Date.now();
     const runMeta: RunMeta = {};
+    const postUsername = await postAsRequester(config.botToken, actingUserId);
     const stream = userId && botTeamId
-      ? await TaskStream.start({ token: config.botToken, channel: channelId, threadTs: replyThreadTs, recipientUserId: userId, recipientTeamId: (event as { team?: string }).team ?? botTeamId, title: "Working on it" })
+      ? await TaskStream.start({ token: config.botToken, channel: channelId, threadTs: replyThreadTs, recipientUserId: userId, recipientTeamId: (event as { team?: string }).team ?? botTeamId, title: "Working on it", username: postUsername })
       : null;
     let progressTs = await postBlocks(
       config.botToken,
@@ -1910,6 +1930,7 @@ async function handleBlockAction(payload: any): Promise<void> {
     }
   }
   const actingUserId = identity?.userId;
+  await postAsRequester(config.botToken, actingUserId);
   const sessionThreadId = threadTs
     ? actingUserId ? userThreadKey(channelId, threadTs, actingUserId) : slackThreadId(channelId, threadTs)
     : undefined;
@@ -2131,7 +2152,7 @@ async function handleSocketPayload(
     }
 
     if (event.type === "message" || event.type === "app_mention") {
-      await handleMessage(event).catch((err) => {
+      await postingAs.run({}, () => handleMessage(event)).catch((err) => {
         console.error(`[Slack] handleMessage error: ${err instanceof Error ? err.message : err}`);
       });
     }
@@ -2164,7 +2185,7 @@ async function handleSocketPayload(
       sendAck(data.envelope_id!);
     }
     if (interactivePayload.type === "block_actions") {
-      await handleBlockAction(interactivePayload).catch((err) => {
+      await postingAs.run({}, () => handleBlockAction(interactivePayload)).catch((err) => {
         console.error(`[Slack] handleBlockAction error: ${err instanceof Error ? err.message : err}`);
       });
     }
