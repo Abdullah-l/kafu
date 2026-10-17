@@ -70,27 +70,84 @@ async function ensureAllAccounts(): Promise<void> {
   for (const [userId, uid] of Object.entries(map)) await ensureAccount(userId, uid);
 }
 
-export async function pruneWorkDirs(maxAgeDays: number): Promise<number> {
-  const root = join(PROJECT_DIR, "agents");
-  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-  let removed = 0;
-  let entries: string[] = [];
+export interface PruneReport {
+  workDirs: number;
+  files: number;
+  bytes: number;
+}
+
+async function pruneOldFiles(dir: string, cutoff: number, report: PruneReport, keepDir = true): Promise<boolean> {
+  let entries: string[];
   try {
-    entries = await readdir(root);
+    entries = await readdir(dir);
   } catch {
-    return 0;
+    return false;
   }
+  let remaining = 0;
   for (const entry of entries) {
-    const path = join(root, entry);
+    const path = join(dir, entry);
+    let stat;
+    try {
+      stat = await lstat(path);
+    } catch {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      const emptied = await pruneOldFiles(path, cutoff, report, false);
+      if (!emptied) remaining++;
+    } else if (stat.mtimeMs < cutoff) {
+      await rm(path, { force: true }).catch(() => {});
+      report.files++;
+      report.bytes += stat.size;
+    } else {
+      remaining++;
+    }
+  }
+  if (remaining === 0 && !keepDir) {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    return true;
+  }
+  return remaining === 0;
+}
+
+async function dirSize(path: string): Promise<number> {
+  let total = 0;
+  try {
+    const stat = await lstat(path);
+    if (!stat.isDirectory()) return stat.size;
+    for (const entry of await readdir(path)) total += await dirSize(join(path, entry));
+  } catch {}
+  return total;
+}
+
+export async function pruneTemporaryFiles(maxAgeDays: number): Promise<PruneReport> {
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  const report: PruneReport = { workDirs: 0, files: 0, bytes: 0 };
+  const agents = join(PROJECT_DIR, "agents");
+  for (const entry of await readdir(agents).catch(() => [] as string[])) {
+    const path = join(agents, entry);
     try {
       const stat = await lstat(path);
       if (stat.uid < FIRST_UID || stat.mtimeMs < cutoff) {
+        report.bytes += await dirSize(path);
         await rm(path, { recursive: true, force: true });
-        removed++;
+        report.workDirs++;
       }
     } catch {}
   }
-  return removed;
+  await pruneOldFiles(join(KAFU_DIR, "inbox"), cutoff, report);
+  await pruneOldFiles(join(KAFU_DIR, "logs"), cutoff, report);
+  const users = join(KAFU_DIR, "users");
+  for (const id of await readdir(users).catch(() => [] as string[])) {
+    await pruneOldFiles(join(users, id, "tmp"), cutoff, report);
+    await pruneOldFiles(join(users, id, "home", ".cache"), cutoff, report);
+    await pruneOldFiles(join(users, id, "home", ".npm", "_cacache"), cutoff, report);
+    const projects = join(users, id, "claude", "projects");
+    for (const project of await readdir(projects).catch(() => [] as string[])) {
+      await pruneOldFiles(join(projects, project), cutoff, report);
+    }
+  }
+  return report;
 }
 
 async function chownTree(path: string, uid: number): Promise<void> {
@@ -165,6 +222,7 @@ export async function prepareSandbox(opts: {
   await stripProjectMemory(opts.configDir);
   await chownTree(opts.configDir, opts.uid);
   await ownedDir(opts.homeDir, opts.uid);
+  await ownedDir(join(opts.userDir, "tmp"), opts.uid);
   await stripMemory(join(opts.homeDir, ".claude"));
   if (opts.workDir) {
     await ownedDir(opts.workDir, opts.uid);

@@ -1166,6 +1166,7 @@ async function execClaude(
     });
     await writeRunToken(identity.userId, homeDir, uid);
     baseEnv.HOME = homeDir;
+    baseEnv.TMPDIR = join(userDir, "tmp");
     if (spawnCwd) baseEnv.KAFU_WORKDIR = spawnCwd;
     baseEnv[RUN_AS_ENV] = String(uid);
   }

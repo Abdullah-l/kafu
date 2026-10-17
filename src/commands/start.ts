@@ -11,7 +11,7 @@ import { getOrCreateWebToken } from "../ui/auth";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { PluginManager, setPluginManager } from "../plugins";
 import { startPortal, stopPortal } from "../portal/server";
-import { isolationEnabled, hardenWorkspace, writeManagedSettings, pruneWorkDirs } from "../isolation";
+import { isolationEnabled, hardenWorkspace, writeManagedSettings, pruneTemporaryFiles } from "../isolation";
 import { startSharedCache } from "../shared-cache";
 import { startSlackTools } from "../slack-tools";
 
@@ -355,8 +355,11 @@ export async function start(args: string[] = []) {
       await hardenWorkspace();
       await writeManagedSettings(currentSettings.multiUser.protectedRepos);
       const prune = async () => {
-        const removed = await pruneWorkDirs(getSettings().multiUser.workDirTtlDays).catch(() => 0);
-        if (removed) console.log(`[${ts()}] Removed ${removed} work folder${removed === 1 ? "" : "s"} unused for ${getSettings().multiUser.workDirTtlDays}+ days`);
+        const days = getSettings().multiUser.tempFileTtlDays;
+        const report = await pruneTemporaryFiles(days).catch(() => null);
+        if (report && (report.workDirs || report.files)) {
+          console.log(`[${ts()}] Cleanup: removed ${report.workDirs} work folder(s) and ${report.files} file(s) older than ${days} days (${Math.round(report.bytes / 1048576)} MB)`);
+        }
       };
       await prune();
       setInterval(() => { void prune(); }, 6 * 60 * 60 * 1000);
