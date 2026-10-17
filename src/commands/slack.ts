@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { watchRunMeta, type RunMeta } from "../runner";
-import { TaskStream, MAX_STREAMED_ANSWER } from "../slack-stream";
+import { TaskStream } from "../slack-stream";
 import { rememberActionToken } from "../slack-tools";
 import { audit } from "../audit";
 import { PR_ACTION_PREFIX, handlePrCardAction } from "../pr-cards";
@@ -1733,11 +1733,14 @@ async function handleMessage(event: SlackMessage): Promise<void> {
 
       const reuseProgress = !!progressTs && !!finalText && !buttons && !select && finalText.length <= 3800;
       recordedReply = finalText || editContent || "";
-      let answeredInStream = false;
+      let doneFooter = "";
       if (pendingStream) {
         const doneTitle = `Done${pendingStream.steps ? ` — ${pendingStream.steps} step${pendingStream.steps === 1 ? "" : "s"}` : ""}`;
-        const inline = !!blockText.trim() && !buttons && !select && blockText.length <= MAX_STREAMED_ANSWER;
-        answeredInStream = await pendingStream.finish(doneTitle, "complete", streamFooter(), inline ? blockText.trim() : undefined);
+        await pendingStream.finish(doneTitle, "complete", streamFooter());
+        if (finalText) {
+          await deleteMessage(config.botToken, channelId, pendingStream.ts);
+          doneFooter = `✓ ${doneTitle}   ${streamFooter()}`;
+        }
         pendingStream = null;
       }
 
@@ -1746,7 +1749,6 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       }
 
       const msgKey = botMessageKey(channelId, replyThreadTs);
-      if (answeredInStream) lastBotMessageTs.set(msgKey, stream!.ts);
 
       if (deleteCount !== 0 || deleteMatches.length > 0) {
         try {
@@ -1859,19 +1861,23 @@ async function handleMessage(event: SlackMessage): Promise<void> {
             await deleteMessage(config.botToken, channelId, progressTs);
           }
         }
-        if (finalText && !answeredInStream) {
+        if (finalText) {
           let sentTs: string | null = null;
           if (buttons || select) {
             sentTs = await sendBlockKitMessage(config.botToken, channelId, finalText, buttons, select, replyThreadTs);
           } else {
             const MAX_LEN = 3800;
             for (let i = 0; i < finalText.length; i += MAX_LEN) {
-              const chunkTs = await postMessage(config.botToken, channelId, finalText.slice(i, i + MAX_LEN), replyThreadTs);
+              const chunk = finalText.slice(i, i + MAX_LEN);
+              const last = i + MAX_LEN >= finalText.length;
+              const chunkTs = last && doneFooter && chunk.length <= 2900
+                ? await postBlocks(config.botToken, channelId, chunk, [{ type: "section", text: { type: "mrkdwn", text: chunk } }, { type: "context", elements: [{ type: "mrkdwn", text: doneFooter }] }], replyThreadTs)
+                : await postMessage(config.botToken, channelId, chunk, replyThreadTs);
               if (chunkTs) sentTs = chunkTs;
             }
           }
           if (sentTs) lastBotMessageTs.set(msgKey, sentTs);
-        } else if (!answeredInStream && !finalText && !editContent && deleteCount === 0 && uploads.length === 0 && channelReads.length === 0) {
+        } else if (!editContent && deleteCount === 0 && uploads.length === 0 && channelReads.length === 0) {
           const sentTs = await postMessage(config.botToken, channelId, "(empty response)", replyThreadTs);
           if (sentTs) lastBotMessageTs.set(msgKey, sentTs);
         }
