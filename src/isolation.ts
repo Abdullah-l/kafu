@@ -136,6 +136,7 @@ export async function pruneTemporaryFiles(maxAgeDays: number): Promise<PruneRepo
     } catch {}
   }
   await pruneOldFiles(join(KAFU_DIR, "inbox"), cutoff, report);
+  await pruneOldFiles(join(KAFU_DIR, "audit"), Date.now() - 90 * 24 * 60 * 60 * 1000, report);
   await pruneOldFiles(join(KAFU_DIR, "logs"), cutoff, report);
   const users = join(KAFU_DIR, "users");
   for (const id of await readdir(users).catch(() => [] as string[])) {
@@ -241,8 +242,22 @@ export async function prepareSandbox(opts: {
   }
 }
 
+let namespaces: boolean | null = null;
+
+export function namespacesAvailable(): boolean {
+  if (namespaces !== null) return namespaces;
+  const probe = Bun.spawnSync(["unshare", "--pid", "--fork", "--mount-proc", "--mount", "--propagation", "private", "sh", "-c", "mount -t tmpfs -o size=1m tmpfs /tmp && true"], { stdout: "ignore", stderr: "ignore" });
+  namespaces = probe.exitCode === 0;
+  return namespaces;
+}
+
+const RUN_LIMITS = ["--nproc=2048", "--nofile=8192", "--core=0"];
+const SANDBOX_MOUNTS = 'mount -t tmpfs -o mode=1777,size=2g,nosuid,nodev tmpfs /tmp && mount -t tmpfs -o mode=1777,size=256m,nosuid,nodev tmpfs /dev/shm && exec "$@"';
+
 export function sandboxCommand(args: string[], uid: number): string[] {
-  return ["setpriv", `--reuid=${uid}`, `--regid=${uid}`, "--clear-groups", "--no-new-privs", "--inh-caps=-all", "--bounding-set=-all", ...args];
+  const drop = ["prlimit", ...RUN_LIMITS, "setpriv", `--reuid=${uid}`, `--regid=${uid}`, "--clear-groups", "--no-new-privs", "--inh-caps=-all", "--bounding-set=-all", ...args];
+  if (!namespacesAvailable()) return drop;
+  return ["unshare", "--pid", "--fork", "--kill-child", "--mount-proc", "--mount", "--propagation", "private", "sh", "-c", SANDBOX_MOUNTS, "kafu-sandbox", ...drop];
 }
 
 async function rootOnly(path: string, mode: number): Promise<void> {
