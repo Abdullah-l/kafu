@@ -42,6 +42,7 @@ describe("slack tools", () => {
         if (method === "conversations.history") return ok({ messages: [{ ts: "1.0", user: "U0ABDULLAH", text: "hi" }] });
         if (method === "chat.postMessage") return ok({ channel: body.channel, ts: "9.9" });
         if (method === "chat.update") return ok({});
+        if (method === "assistant.search.context") return body.action_token === "act-1" ? ok({ results: { messages: [{ content: "deploy is green", permalink: "https://x/p1" }] } }) : new Response(JSON.stringify({ ok: false, error: "invalid_action_token" }));
         if (method === "files.getUploadURLExternal") return ok({ upload_url: "https://files.slack.com/upload/v1/abc", file_id: "F0UPLOAD001" });
         if (u.host === "files.slack.com" && u.pathname.startsWith("/upload")) return new Response("OK");
         if (method === "files.completeUploadExternal") return ok({ files: [{ id: "F0UPLOAD001" }] });
@@ -67,7 +68,12 @@ describe("slack tools", () => {
       const uploadPrivOutsider = await t.runTool("slack_upload_file", { channel: "G0PRIV0001", filename: "x.txt", content_base64: "eA==" }, "U0BOBBY001");
       const downloadMember = await t.runTool("slack_download_file", { file_id: "F0PRIVFILE1" }, "U0ABDULLAH");
       const downloadOutsider = await t.runTool("slack_download_file", { file_id: "F0PRIVFILE1" }, "U0BOBBY001");
+      const searchNoToken = await t.runTool("slack_search", { query: "deploy" }, "U0BOBBY001");
+      t.rememberActionToken("U0ABDULLAH", "act-1");
+      const search = await t.runTool("slack_search", { query: "deploy" }, "U0ABDULLAH");
       console.log(JSON.stringify({
+        searchNoToken: searchNoToken.ok,
+        search: search.ok && search.result.results.messages[0].content,
         upload: upload.result,
         uploadPrivOutsider: uploadPrivOutsider.ok,
         downloadMember: downloadMember.ok && Buffer.from(downloadMember.result.content_base64, "base64").toString(),
@@ -85,6 +91,8 @@ describe("slack tools", () => {
       }));
     `);
     expect(JSON.parse(out)).toEqual({
+      searchNoToken: false,
+      search: "deploy is green",
       upload: { file_id: "F0UPLOAD001", channel: "C0PUB00001", permalink: "https://x.slack.com/files/F0UPLOAD001" },
       uploadPrivOutsider: false,
       downloadMember: "abc",
@@ -115,5 +123,16 @@ describe("slack tools", () => {
     expect(tools).toContain("slack_usergroup_members");
     expect(tools).toContain("slack_upload_file");
     expect(tools).toContain("slack_download_file");
+  });
+});
+
+describe("live task stream", () => {
+  test("parses tool calls and results from the activity feed", async () => {
+    const { parseToolLine } = await import("../slack-stream");
+    expect(parseToolLine("● Bash(git status -sb)")).toEqual({ kind: "call", tool: "Bash", detail: "git status -sb" });
+    expect(parseToolLine("  ⎿  [Bash] ## develop...origin/develop")).toEqual({ kind: "result", tool: "Bash", output: "## develop...origin/develop", error: false });
+    expect(parseToolLine("  ⎿  [Read] Error: no such file")).toEqual({ kind: "result", tool: "Read", output: "Error: no such file", error: true });
+    expect(parseToolLine("● mcp__slack__slack_post_message(...)")).toEqual({ kind: "call", tool: "mcp__slack__slack_post_message", detail: "..." });
+    expect(parseToolLine("thinking...")).toBeNull();
   });
 });

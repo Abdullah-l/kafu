@@ -1,4 +1,6 @@
 import { watchRunMeta, type RunMeta } from "../runner";
+import { TaskStream } from "../slack-stream";
+import { rememberActionToken } from "../slack-tools";
 import { modelLabel } from "../models";
 import { ensureProjectClaudeMd, runUserMessage, compactCurrentSession, agentDirKey, killRun, consumeUserStopped } from "../runner";
 import { getSettings, loadSettings } from "../config";
@@ -169,6 +171,8 @@ setInterval(() => {
 
 let botUserId: string | null = null;
 let botUsername: string | null = null;
+let botTeamId: string | null = null;
+let loggedMissingActionToken = false;
 
 function debugLog(message: string): void {
   if (!slackDebug) return;
@@ -357,12 +361,12 @@ export function runStatusLine(meta: RunMeta, elapsedMs: number): string {
   return parts.join("   ");
 }
 
-function progressBlocks(header: string, activity: string[], cancelKey: string, status?: string): Record<string, unknown>[] {
+function progressBlocks(header: string, activity: string[], cancelKey: string, status?: string, compact = false): Record<string, unknown>[] {
   const feed = activity.length
     ? "```\n" + activity.slice(-PROGRESS_MAX_LINES).join("\n").slice(0, 2800) + "\n```"
     : "_starting…_";
   return [
-    { type: "section", text: { type: "mrkdwn", text: `${header}\n${feed}` } },
+    ...(compact ? [] : [{ type: "section", text: { type: "mrkdwn", text: `${header}\n${feed}` } }]),
     ...(status ? [{ type: "context", elements: [{ type: "mrkdwn", text: status }] }] : []),
     {
       type: "actions",
@@ -467,6 +471,7 @@ interface InflightRun {
   progressTs: string;
   messageTs: string;
   startedAt: string;
+  streamTs?: string;
 }
 
 let inflightWrite: Promise<void> = Promise.resolve();
@@ -493,6 +498,7 @@ async function recoverInterruptedRuns(token: string): Promise<void> {
   const runs = await readInflight();
   if (runs.length === 0) return;
   for (const run of runs) {
+    if (run.streamTs) await TaskStream.stopOrphan(token, run.channelId, run.streamTs, "Interrupted");
     await collapseProgress(token, run.channelId, run.progressTs, INTERRUPTED_TEXT);
     await removeReaction(token, run.channelId, run.messageTs, "hourglass_flowing_sand");
   }
@@ -1331,6 +1337,12 @@ async function handleMessage(event: SlackMessage): Promise<void> {
   try {
     const inThread = !!event.thread_ts;
     const replyThreadTs = event.thread_ts ?? event.ts;
+    const actionToken = (event as { action_token?: string }).action_token;
+    if (actionToken && userId) rememberActionToken(identity?.userId ?? userId, actionToken);
+    else if (!loggedMissingActionToken) {
+      loggedMissingActionToken = true;
+      console.log(`[Slack] No action_token on this event; Slack search needs one (event keys: ${Object.keys(event).join(",")})`);
+    }
     const actingUserId = identity?.userId;
     const sessionThreadId = actingUserId
       ? inThread || !isDirectMessage
@@ -1543,14 +1555,17 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     const activity: string[] = [];
     const startedAt = Date.now();
     const runMeta: RunMeta = {};
-    const progressTs = await postBlocks(
+    const stream = userId && botTeamId
+      ? await TaskStream.start({ token: config.botToken, channel: channelId, threadTs: replyThreadTs, recipientUserId: userId, recipientTeamId: (event as { team?: string }).team ?? botTeamId, title: "Working on it" })
+      : null;
+    let progressTs = await postBlocks(
       config.botToken,
       channelId,
       "Working…",
-      progressBlocks("🛠️ *Working…*", activity, cancelKey, runStatusLine(runMeta, 0)),
+      progressBlocks("🛠️ *Working…*", activity, cancelKey, runStatusLine(runMeta, 0), !!stream),
       replyThreadTs,
     );
-    if (progressTs) await updateInflight((runs) => [...runs, { channelId, progressTs, messageTs: event.ts, startedAt: new Date(startedAt).toISOString() }]);
+    if (progressTs) await updateInflight((runs) => [...runs, { channelId, progressTs: progressTs!, messageTs: event.ts, startedAt: new Date(startedAt).toISOString(), ...(stream ? { streamTs: stream.ts } : {}) }]);
     let progressDirty = false;
     let lastFlushAt = Date.now();
     const stopMetaWatch = watchRunMeta(cancelKey, (meta) => {
@@ -1566,13 +1581,14 @@ async function handleMessage(event: SlackMessage): Promise<void> {
         channelId,
         progressTs,
         "Working…",
-        progressBlocks("🛠️ *Working…*", activity, cancelKey, runStatusLine(runMeta, Date.now() - startedAt)),
+        progressBlocks("🛠️ *Working…*", activity, cancelKey, runStatusLine(runMeta, Date.now() - startedAt), !!stream),
       );
     };
     const progressTimer = progressTs
       ? setInterval(() => { void flushProgress(); }, STREAM_UPDATE_INTERVAL_MS)
       : null;
     const onToolEvent = (line: string) => {
+      stream?.push(line);
       const clean = line.replace(/\s+/g, " ").trim().slice(0, PROGRESS_LINE_MAX);
       if (clean) { activity.push(clean); progressDirty = true; }
     };
@@ -1601,6 +1617,13 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     }
 
     const stopped = consumeUserStopped(cancelKey);
+    if (stream) {
+      const failed = !stopped && result.exitCode !== 0;
+      const title = stopped ? "Stopped" : failed ? "Something went wrong" : `Done${stream.steps ? ` — ${stream.steps} step${stream.steps === 1 ? "" : "s"}` : ""}`;
+      await stream.finish(title, failed || stopped ? "error" : "complete", runStatusLine(runMeta, Date.now() - startedAt));
+      if (progressTs) await deleteMessage(config.botToken, channelId, progressTs);
+      progressTs = null;
+    }
     let recordedReply = "";
     let recordedStatus: TurnStatus = "ok";
     const authFailed = !!identity && (result.exitCode === 0
@@ -1614,7 +1637,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
       await clearAssistantStatus(config.botToken, channelId, replyThreadTs);
       if (progressTs) {
         await collapseProgress(config.botToken, channelId, progressTs, "⏹ Stopped.", runStatusLine(runMeta, Date.now() - startedAt));
-      } else {
+      } else if (!stream) {
         await sendMessage(config.botToken, channelId, "⏹ Stopped.", replyThreadTs);
       }
     } else if (result.exitCode !== 0 || authFailed) {
@@ -2273,13 +2296,14 @@ export function startSlack(debug = false): void {
     await mkdir(SLACK_OUTBOX_DIR, { recursive: true });
 
     try {
-      const authData = await slackApi<{ user_id: string; user: string }>(
+      const authData = await slackApi<{ user_id: string; user: string; team_id?: string }>(
         config.botToken,
         "auth.test",
         {},
       );
       botUserId = authData.user_id;
       botUsername = authData.user;
+      botTeamId = authData.team_id ?? null;
       setAssistantName(botUsername);
       console.log(`  Bot: @${botUsername} (${botUserId})`);
     } catch (err) {
@@ -2314,9 +2338,10 @@ export async function slack(): Promise<void> {
   console.log("Slack bot started (Socket Mode, standalone)");
 
   try {
-    const authData = await slackApi<{ user_id: string; user: string }>(config.botToken, "auth.test", {});
+    const authData = await slackApi<{ user_id: string; user: string; team_id?: string }>(config.botToken, "auth.test", {});
     botUserId = authData.user_id;
     botUsername = authData.user;
+    botTeamId = authData.team_id ?? null;
     setAssistantName(botUsername);
     console.log(`  Bot: @${botUsername} (${botUserId})`);
   } catch (err) {

@@ -42,6 +42,12 @@ export interface ToolResult {
 let userCache: { at: number; users: SlackUser[] } | null = null;
 let channelCache: { at: number; channels: SlackChannel[] } | null = null;
 const writes = new Map<string, number[]>();
+const actionTokens = new Map<string, { token: string; at: number }>();
+const ACTION_TOKEN_TTL_MS = 10 * 60_000;
+
+export function rememberActionToken(userId: string, token: string): void {
+  actionTokens.set(userId, { token, at: Date.now() });
+}
 const posted = new Map<string, string>();
 
 function token(): string {
@@ -374,6 +380,41 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
       const res = await fetch(file.url_private_download ?? file.url_private, { headers: { Authorization: `Bearer ${token()}` } });
       if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
       return { name: file.name, mimetype: file.mimetype, content_base64: Buffer.from(await res.arrayBuffer()).toString("base64") };
+    },
+  },
+  slack_search: {
+    description: "Search Slack messages, files, channels or people with the asker's access (public channels, plus the private channel the request came from). Supports natural-language queries. Use after/before (unix seconds) to limit dates, channel to search one channel.",
+    schema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        content_types: { type: "array", items: { type: "string", enum: ["messages", "files", "channels", "users"] } },
+        channel: { type: "string" },
+        after: { type: "number" },
+        before: { type: "number" },
+        sort: { type: "string", enum: ["score", "timestamp"] },
+        limit: { type: "number" },
+        cursor: { type: "string" },
+      },
+      required: ["query"],
+    },
+    handler: async (args, requester) => {
+      const action = actionTokens.get(requester);
+      if (!action || Date.now() - action.at > ACTION_TOKEN_TTL_MS) throw new Error("Slack search needs a fresh mention from the person asking; ask them to mention the bot again");
+      const channel = args.channel ? await resolveChannel(args.channel, requester, false) : null;
+      const data = await slackPost<{ results: Record<string, any[]>; response_metadata?: { next_cursor?: string } }>("assistant.search.context", {
+        query: String(args.query),
+        action_token: action.token,
+        content_types: Array.isArray(args.content_types) && args.content_types.length ? args.content_types : ["messages"],
+        ...(channel ? { context_channel_id: channel.id } : {}),
+        ...(args.after ? { after: Number(args.after) } : {}),
+        ...(args.before ? { before: Number(args.before) } : {}),
+        ...(args.sort ? { sort: String(args.sort) } : {}),
+        ...(args.cursor ? { cursor: String(args.cursor) } : {}),
+        limit: Math.min(Math.max(Number(args.limit) || 20, 1), 20),
+        include_context_messages: true,
+      });
+      return { results: data.results, next_cursor: data.response_metadata?.next_cursor ?? "" };
     },
   },
   slack_get_permalink: {
