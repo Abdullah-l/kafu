@@ -195,6 +195,7 @@ export async function runSchedule(schedule: Schedule): Promise<string> {
       return "failed";
     }
     const footer = `Scheduled by <@${schedule.owner}>: ${schedule.name}`;
+    const username = await (await import("./slack-tools")).postingName(schedule.owner).catch(() => undefined);
     for (let i = 0; i < text.length; i += 3800) {
       const chunk = text.slice(i, i + 3800);
       const last = i + 3800 >= text.length;
@@ -202,6 +203,7 @@ export async function runSchedule(schedule: Schedule): Promise<string> {
         channel: schedule.channel,
         text: chunk,
         unfurl_links: false,
+        ...(username ? { username } : {}),
         ...(last ? { blocks: [{ type: "section", text: { type: "mrkdwn", text: chunk } }, { type: "context", elements: [{ type: "mrkdwn", text: footer }] }] } : {}),
       });
     }

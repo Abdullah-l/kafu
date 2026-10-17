@@ -65,7 +65,7 @@ export class TaskStream {
 
   private constructor(private token: string, readonly channel: string, readonly ts: string) {}
 
-  static async start(opts: { token: string; channel: string; threadTs: string; recipientUserId: string; recipientTeamId: string; title: string }): Promise<TaskStream | null> {
+  static async start(opts: { token: string; channel: string; threadTs: string; recipientUserId: string; recipientTeamId: string; title: string; username?: string }): Promise<TaskStream | null> {
     try {
       const data = await call(opts.token, "chat.startStream", {
         channel: opts.channel,
@@ -74,6 +74,7 @@ export class TaskStream {
         recipient_team_id: opts.recipientTeamId,
         task_display_mode: "plan",
         chunks: [{ type: "plan_update", title: clip(opts.title) }],
+        ...(opts.username ? { username: opts.username } : {}),
       });
       const stream = new TaskStream(opts.token, opts.channel, String(data.ts));
       stream.timer = setInterval(() => { void stream.flush(); }, FLUSH_MS);
