@@ -127,7 +127,7 @@
       if (s.method === "github" && !u.paste) {
         body.push(el("div", { class: "panel" }, [
           el("div", { class: "actions" }, [el("button", { class: "primary", text: u.busy ? "Starting…" : "Sign in with " + s.label, onclick: function () { startDevice(s); } })]),
-          el("button", { class: "link", text: "Paste a token instead", onclick: function () { setUi(s.id, { paste: true }); } }),
+          s.pasteAllowed === false ? null : el("button", { class: "link", text: "Paste a token instead", onclick: function () { setUi(s.id, { paste: true }); } }),
         ]));
       } else {
         var input = el("input", { type: "password", placeholder: s.label + " token", "aria-label": s.label + " token", autocomplete: "off", value: u.draft || "", oninput: function (e) { (ui[s.id] = ui[s.id] || {}).draft = e.target.value; }, onenter: function () { saveSecret(s, input.value); } });

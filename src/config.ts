@@ -99,6 +99,7 @@ export interface CredentialSpec {
   pattern: string;
   method: "paste" | "github";
   scopes: string[];
+  clientId: string;
 }
 
 export interface PortalConfig {
@@ -401,6 +402,7 @@ function parseCredentials(value: unknown): CredentialSpec[] {
       pattern: typeof entry.pattern === "string" ? entry.pattern : "",
       method: entry.method === "github" ? "github" : "paste",
       scopes: Array.isArray(entry.scopes) ? entry.scopes.filter((s: unknown) => typeof s === "string" && /^[a-z:_]+$/.test(s)) : [],
+      clientId: typeof entry.clientId === "string" && /^[A-Za-z0-9._-]+$/.test(entry.clientId.trim()) ? entry.clientId.trim() : "",
     });
   }
   return out;

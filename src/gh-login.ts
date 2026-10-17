@@ -35,6 +35,52 @@ export function cancelGhLogin(key: string): void {
   active.delete(key);
 }
 
+const appLogins = new Map<string, { cancelled: boolean }>();
+
+export function cancelAppLogin(key: string): void {
+  const login = appLogins.get(key);
+  if (login) login.cancelled = true;
+  appLogins.delete(key);
+}
+
+async function postForm(url: string, body: Record<string, string>): Promise<Record<string, any>> {
+  const res = await fetch(url, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return (await res.json()) as Record<string, any>;
+}
+
+export async function startAppDeviceLogin(key: string, clientId: string): Promise<GhDeviceLogin> {
+  cancelAppLogin(key);
+  const start = await postForm("https://github.com/login/device/code", { client_id: clientId });
+  if (!start.device_code || !start.user_code) throw new Error(`GitHub didn't return a device code${start.error_description ? `: ${start.error_description}` : ""}`);
+  const login = { cancelled: false };
+  appLogins.set(key, login);
+  const result = (async (): Promise<{ token?: string; error?: string }> => {
+    let interval = Math.max(Number(start.interval) || 5, 5) * 1000;
+    const deadline = Date.now() + Math.min(Number(start.expires_in) || 900, APPROVAL_TIMEOUT_MS / 1000) * 1000;
+    while (Date.now() < deadline) {
+      await Bun.sleep(interval);
+      if (login.cancelled) return { error: "cancelled" };
+      const poll = await postForm("https://github.com/login/oauth/access_token", {
+        client_id: clientId,
+        device_code: start.device_code,
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      }).catch(() => ({ error: "network" }) as Record<string, any>);
+      if (poll.access_token) {
+        appLogins.delete(key);
+        return { token: String(poll.access_token) };
+      }
+      if (poll.error === "slow_down") interval += 5000;
+      else if (poll.error && !["authorization_pending", "network"].includes(poll.error)) {
+        appLogins.delete(key);
+        return { error: poll.error_description || poll.error };
+      }
+    }
+    appLogins.delete(key);
+    return { error: "The sign-in code expired. Start again." };
+  })();
+  return { code: String(start.user_code), url: String(start.verification_uri || "https://github.com/login/device"), result };
+}
+
 export async function startGhDeviceLogin(key: string, configDir: string, scopes: string[] = []): Promise<GhDeviceLogin> {
   cancelGhLogin(key);
   await rm(configDir, { recursive: true, force: true });

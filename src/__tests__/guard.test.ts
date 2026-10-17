@@ -16,10 +16,13 @@ const remotes: Record<string, string[]> = {
   [normalCheckout]: ["remote.origin.url git@github.com:moyasar/moyasar-api.git"],
 };
 
+const branches: Record<string, string> = { [normalCheckout]: "ALP-1270" };
+
 const ctx = {
   repos,
   env: { CLAUDE_CONFIG_DIR: join(root, "users", "U1", "claude"), HOME: join(root, "users", "U1", "home"), KAFU_WORKDIR: work },
   remotesOf: (dir: string) => remotes[dir] ?? [],
+  currentBranch: (dir: string) => branches[dir] ?? "",
 };
 
 function bash(command: string, cwd = work): string | null {
@@ -75,5 +78,45 @@ describe("guard: instruction files", () => {
     expect(write(join(normalCheckout, "CLAUDE.md"), "Edit")).toBeNull();
     expect(bash("cat CLAUDE.md")).toBeNull();
     expect(bash("bundle exec rspec > /tmp/out.txt")).toBeNull();
+  });
+});
+
+describe("guard: GitHub policy", () => {
+  test("blocks merging, settings, secrets, workflows and releases", () => {
+    expect(bash("gh pr merge 2902 --squash", normalCheckout)).toContain("Merging");
+    expect(bash("gh api -X PUT repos/moyasar/moyasar-api/pulls/2902/merge")).toContain("Merging");
+    expect(bash("gh repo edit moyasar/moyasar-api --default-branch main")).not.toBeNull();
+    expect(bash("gh secret set FOO -R moyasar/moyasar-api")).not.toBeNull();
+    expect(bash("gh workflow run deploy.yml")).not.toBeNull();
+    expect(bash("gh release create v1.2.3")).not.toBeNull();
+    expect(bash("gh api -X PUT repos/moyasar/moyasar-api/branches/develop/protection --input p.json")).not.toBeNull();
+    expect(bash("gh api repos/moyasar/moyasar-api/hooks -f url=https://x")).not.toBeNull();
+    expect(bash("gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'")).not.toBeNull();
+    expect(bash("curl -X PATCH https://api.github.com/repos/moyasar/moyasar-api -d '{}'")).not.toBeNull();
+  });
+
+  test("blocks pushing to or deleting protected branches", () => {
+    expect(bash("git push origin develop", normalCheckout)).not.toBeNull();
+    expect(bash("git push origin HEAD:refs/heads/main", normalCheckout)).not.toBeNull();
+    expect(bash("git push origin :ALP-1270", normalCheckout)).not.toBeNull();
+    expect(bash("git push --delete origin ALP-1270", normalCheckout)).not.toBeNull();
+    expect(bash("git push --tags", normalCheckout)).not.toBeNull();
+    branches[normalCheckout] = "develop";
+    expect(bash("git push", normalCheckout)).not.toBeNull();
+    branches[normalCheckout] = "ALP-1270";
+  });
+
+  test("allows the normal PR workflow", () => {
+    expect(bash("git push -u origin ALP-1270", normalCheckout)).toBeNull();
+    expect(bash("git push --force-with-lease origin ALP-1270", normalCheckout)).toBeNull();
+    expect(bash("git push", normalCheckout)).toBeNull();
+    expect(bash("gh pr create --draft --title 'ALP-1270: x' --body ALP-1270", normalCheckout)).toBeNull();
+    expect(bash("gh pr edit 2902 --body 'ALP-1270'", normalCheckout)).toBeNull();
+    expect(bash("gh pr view 2902 --json reviews")).toBeNull();
+    expect(bash("gh api repos/moyasar/moyasar-api/pulls/2902/comments -f body='looks good'")).toBeNull();
+    expect(bash("gh api -X PATCH repos/moyasar/moyasar-api/pulls/2902 -f title='ALP-1270: y'")).toBeNull();
+    expect(bash("gh api repos/moyasar/moyasar-api/pulls?state=open | jq length")).toBeNull();
+    expect(bash("gh api graphql -f query='query { viewer { login } }'")).toBeNull();
+    expect(bash("gh run view 123 --log-failed")).toBeNull();
   });
 });

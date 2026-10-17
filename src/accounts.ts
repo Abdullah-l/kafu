@@ -1,6 +1,6 @@
 import { CLAUDE_EXECUTABLE } from "./runner";
 import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir, userScratchDir, setUserSecret, clearUserSecret } from "./users";
-import { startGhDeviceLogin, cancelGhLogin } from "./gh-login";
+import { startGhDeviceLogin, startAppDeviceLogin, cancelGhLogin } from "./gh-login";
 import { startLogin, submitLoginCode, cancelLogin, pendingLoginUrl } from "./login";
 import { MODELS, modelLabel } from "./models";
 import { getSettings, type CredentialSpec } from "./config";
@@ -17,6 +17,7 @@ export interface ServiceStatus {
   label: string;
   method: "paste" | "github";
   help: string;
+  pasteAllowed: boolean;
   connected: boolean;
   device: DeviceState | null;
 }
@@ -77,6 +78,7 @@ export async function accountStatus(userId: string): Promise<AccountStatus> {
       label: spec.label,
       method: spec.method,
       help: spec.help,
+      pasteAllowed: !spec.clientId,
       connected: !!user?.secrets[spec.id],
       device: user?.secrets[spec.id] ? null : deviceStates.get(deviceKey(userId, spec.id)) ?? null,
     })),
@@ -117,7 +119,9 @@ export async function startDeviceConnect(userId: string, id: string, onDone?: (r
   const spec = findSpec(id);
   if (!spec || spec.method !== "github") throw new Error(`${id} doesn't support sign-in links`);
   const key = deviceKey(userId, spec.id);
-  const login = await startGhDeviceLogin(key, userScratchDir(userId, `${spec.id}-login`), spec.scopes);
+  const login = spec.clientId
+    ? await startAppDeviceLogin(key, spec.clientId)
+    : await startGhDeviceLogin(key, userScratchDir(userId, `${spec.id}-login`), spec.scopes);
   const state: DeviceState = { status: "pending", code: login.code, url: login.url };
   deviceStates.set(key, state);
   void login.result.then(async (res) => {
