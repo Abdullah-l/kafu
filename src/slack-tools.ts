@@ -8,6 +8,8 @@ const SLACK_API = "https://slack.com/api";
 const DIRECTORY_TTL_MS = 30 * 60_000;
 const WRITE_LIMIT = 40;
 const WRITE_WINDOW_MS = 5 * 60_000;
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const MAX_REQUEST_CHARS = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4 + 100_000;
 
 interface SlackUser {
   id: string;
@@ -196,7 +198,7 @@ async function formatMessages(messages: any[]): Promise<unknown[]> {
       user_name: m.bot_id ? m.username || "bot" : await nameOf(m.user),
       text: m.text,
       reply_count: m.reply_count,
-      files: (m.files ?? []).map((f: any) => f.name),
+      files: (m.files ?? []).map((f: any) => ({ id: f.id, name: f.name, mimetype: f.mimetype, size: f.size })),
     });
   }
   return out;
@@ -329,6 +331,51 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
       return { ok: true };
     },
   },
+  slack_upload_file: {
+    description: "Upload a file to Slack: a channel (ID or #name), a thread (thread_ts), or a person's DM (their user ID). Pass the local file path; the file is read from your working environment. Up to 25 MB.",
+    schema: { type: "object", properties: { path: { type: "string" }, channel: { type: "string" }, thread_ts: { type: "string" }, title: { type: "string" }, comment: { type: "string" } }, required: ["path", "channel"] },
+    handler: async (args, requester) => {
+      const data = Buffer.from(String(args.content_base64 ?? ""), "base64");
+      if (data.length === 0) throw new Error("the file is empty or couldn't be read");
+      if (data.length > MAX_UPLOAD_BYTES) throw new Error("files over 25 MB can't be uploaded");
+      const filename = String(args.filename ?? "file").replace(/[\\/]/g, "_").slice(0, 200) || "file";
+      const channel = await resolveChannel(args.channel, requester, true);
+      checkWriteBudget(requester);
+      const target = await slackGet<{ upload_url: string; file_id: string }>("files.getUploadURLExternal", { filename, length: data.length });
+      const put = await fetch(target.upload_url, { method: "POST", body: data });
+      if (!put.ok) throw new Error(`upload failed: HTTP ${put.status}`);
+      await slackPost("files.completeUploadExternal", {
+        files: [{ id: target.file_id, title: String(args.title ?? filename) }],
+        channel_id: channel.id,
+        ...(args.thread_ts ? { thread_ts: String(args.thread_ts) } : {}),
+        ...(args.comment ? { initial_comment: String(args.comment) } : {}),
+      });
+      console.log(`[${new Date().toLocaleTimeString()}] Slack tools: ${requester} uploaded ${filename} to ${channel.id}`);
+      const info = await slackGet<{ file: { permalink?: string } }>("files.info", { file: target.file_id }).catch(() => ({ file: {} as { permalink?: string } }));
+      return { file_id: target.file_id, channel: channel.id, permalink: info.file.permalink ?? "" };
+    },
+  },
+  slack_download_file: {
+    description: "Download a file shared in Slack (by file ID, from slack_read_messages) into your working directory. Only files in conversations you can see.",
+    schema: { type: "object", properties: { file_id: { type: "string" }, save_as: { type: "string" } }, required: ["file_id"] },
+    handler: async (args, requester) => {
+      const file = (await slackGet<{ file: any }>("files.info", { file: String(args.file_id) })).file;
+      const places: string[] = [...(file.channels ?? []), ...(file.groups ?? []), ...(file.ims ?? [])];
+      let allowed = false;
+      for (const place of places) {
+        try {
+          await resolveChannel(place, requester, false);
+          allowed = true;
+          break;
+        } catch {}
+      }
+      if (!allowed) throw new Error("that file isn't in a conversation you can see");
+      if ((file.size ?? 0) > MAX_UPLOAD_BYTES) throw new Error("files over 25 MB can't be downloaded here");
+      const res = await fetch(file.url_private_download ?? file.url_private, { headers: { Authorization: `Bearer ${token()}` } });
+      if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
+      return { name: file.name, mimetype: file.mimetype, content_base64: Buffer.from(await res.arrayBuffer()).toString("base64") };
+    },
+  },
   slack_get_permalink: {
     description: "Get the permalink of a message.",
     schema: { type: "object", properties: { channel: { type: "string" }, ts: { type: "string" } }, required: ["channel", "ts"] },
@@ -373,7 +420,7 @@ export async function startSlackTools(): Promise<boolean> {
       data(socket, chunk) {
         if (socket.data.handled) return;
         socket.data.buffer += chunk.toString();
-        if (socket.data.buffer.length > 200_000) {
+        if (socket.data.buffer.length > MAX_REQUEST_CHARS) {
           socket.end(JSON.stringify({ ok: false, error: "request too large" }) + "\n");
           return;
         }

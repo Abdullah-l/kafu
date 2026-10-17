@@ -31,7 +31,7 @@ describe("slack tools", () => {
       globalThis.fetch = async (url, init) => {
         const u = new URL(url);
         const method = u.pathname.split("/").pop();
-        const body = init?.body ? JSON.parse(init.body) : Object.fromEntries(u.searchParams);
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : Object.fromEntries(u.searchParams);
         calls.push(method);
         const ok = (x) => new Response(JSON.stringify({ ok: true, ...x }));
         if (method === "users.list") return ok({ members: users });
@@ -42,6 +42,12 @@ describe("slack tools", () => {
         if (method === "conversations.history") return ok({ messages: [{ ts: "1.0", user: "U0ABDULLAH", text: "hi" }] });
         if (method === "chat.postMessage") return ok({ channel: body.channel, ts: "9.9" });
         if (method === "chat.update") return ok({});
+        if (method === "files.getUploadURLExternal") return ok({ upload_url: "https://files.slack.com/upload/v1/abc", file_id: "F0UPLOAD001" });
+        if (u.host === "files.slack.com" && u.pathname.startsWith("/upload")) return new Response("OK");
+        if (method === "files.completeUploadExternal") return ok({ files: [{ id: "F0UPLOAD001" }] });
+        if (method === "files.info" && body.file === "F0UPLOAD001") return ok({ file: { permalink: "https://x.slack.com/files/F0UPLOAD001" } });
+        if (method === "files.info" && body.file === "F0PRIVFILE1") return ok({ file: { name: "secret.pdf", groups: ["G0PRIV0001"], url_private: "https://files.slack.com/files-pri/x/secret.pdf", size: 3 } });
+        if (u.host === "files.slack.com" && u.pathname.startsWith("/files-pri")) return new Response("abc");
         if (method === "chat.getPermalink") return ok({ permalink: "https://x.slack.com/archives/" + body.channel + "/p99" });
         return new Response(JSON.stringify({ ok: false, error: "unexpected " + method }));
       };
@@ -57,7 +63,15 @@ describe("slack tools", () => {
       const dm = await t.runTool("slack_post_message", { channel: "<@U0KHALID01>", text: "hey" }, "U0ABDULLAH");
       const editOthers = await t.runTool("slack_update_message", { channel: "C0PUB00001", ts: "9.9", text: "y" }, "U0KHALID01");
       const editOwn = await t.runTool("slack_update_message", { channel: "C0PUB00001", ts: "9.9", text: "y" }, "U0ABDULLAH");
+      const upload = await t.runTool("slack_upload_file", { channel: "#alpha", filename: "report.csv", content_base64: Buffer.from("a,b").toString("base64"), comment: "here" }, "U0ABDULLAH");
+      const uploadPrivOutsider = await t.runTool("slack_upload_file", { channel: "G0PRIV0001", filename: "x.txt", content_base64: "eA==" }, "U0KHALID01");
+      const downloadMember = await t.runTool("slack_download_file", { file_id: "F0PRIVFILE1" }, "U0ABDULLAH");
+      const downloadOutsider = await t.runTool("slack_download_file", { file_id: "F0PRIVFILE1" }, "U0KHALID01");
       console.log(JSON.stringify({
+        upload: upload.result,
+        uploadPrivOutsider: uploadPrivOutsider.ok,
+        downloadMember: downloadMember.ok && Buffer.from(downloadMember.result.content_base64, "base64").toString(),
+        downloadOutsider: downloadOutsider.ok,
         find: find.result.map((u) => u.id),
         byEmail: byEmail.result.map((u) => u.mention),
         privMember: privMember.ok,
@@ -71,6 +85,10 @@ describe("slack tools", () => {
       }));
     `);
     expect(JSON.parse(out)).toEqual({
+      upload: { file_id: "F0UPLOAD001", channel: "C0PUB00001", permalink: "https://x.slack.com/files/F0UPLOAD001" },
+      uploadPrivOutsider: false,
+      downloadMember: "abc",
+      downloadOutsider: false,
       find: ["U0KHALID01"],
       byEmail: ["<@U0ABDULLAH>"],
       privMember: true,
@@ -95,5 +113,7 @@ describe("slack tools", () => {
     expect(tools).toContain("slack_post_message");
     expect(tools).toContain("slack_find_users");
     expect(tools).toContain("slack_usergroup_members");
+    expect(tools).toContain("slack_upload_file");
+    expect(tools).toContain("slack_download_file");
   });
 });

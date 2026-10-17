@@ -1,5 +1,7 @@
 import { connect } from "node:net";
-import { TOOLS, SLACK_SOCKET } from "./slack-tools";
+import { readFile, stat, writeFile, mkdir } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
+import { TOOLS, SLACK_SOCKET, MAX_UPLOAD_BYTES } from "./slack-tools";
 import { readRunToken } from "./run-token";
 
 function send(message: unknown): void {
@@ -23,6 +25,31 @@ function callBroker(tool: string, args: unknown): Promise<{ ok: boolean; result?
   }), (err) => ({ ok: false, error: `no kafu token: ${err instanceof Error ? err.message : err}` }));
 }
 
+async function callTool(name: string, args: Record<string, any>): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+  if (name === "slack_upload_file") {
+    const path = resolve(String(args.path ?? ""));
+    try {
+      const info = await stat(path);
+      if (!info.isFile()) return { ok: false, error: `${path} isn't a file` };
+      if (info.size > MAX_UPLOAD_BYTES) return { ok: false, error: "files over 25 MB can't be uploaded" };
+      const content_base64 = (await readFile(path)).toString("base64");
+      return callBroker(name, { ...args, path: undefined, filename: basename(path), content_base64 });
+    } catch (err) {
+      return { ok: false, error: `can't read ${path}: ${err instanceof Error ? err.message : err}` };
+    }
+  }
+  if (name === "slack_download_file") {
+    const result = await callBroker(name, args);
+    if (!result.ok) return result;
+    const file = result.result as { name: string; mimetype: string; content_base64: string };
+    const target = resolve(String(args.save_as || `slack-files/${basename(file.name || String(args.file_id))}`));
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, Buffer.from(file.content_base64, "base64"));
+    return { ok: true, result: { saved_to: target, name: file.name, mimetype: file.mimetype } };
+  }
+  return callBroker(name, args);
+}
+
 async function handle(message: any): Promise<void> {
   const { id, method, params } = message;
   if (id === undefined || id === null) return;
@@ -33,7 +60,7 @@ async function handle(message: any): Promise<void> {
   } else if (method === "tools/list") {
     send({ jsonrpc: "2.0", id, result: { tools: Object.entries(TOOLS).map(([name, t]) => ({ name, description: t.description, inputSchema: t.schema })) } });
   } else if (method === "tools/call") {
-    const result = await callBroker(params?.name, params?.arguments ?? {});
+    const result = await callTool(params?.name, params?.arguments ?? {});
     send({
       jsonrpc: "2.0",
       id,
