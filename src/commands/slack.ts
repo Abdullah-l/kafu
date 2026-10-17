@@ -1,6 +1,7 @@
 import { watchRunMeta, type RunMeta } from "../runner";
 import { TaskStream } from "../slack-stream";
 import { rememberActionToken } from "../slack-tools";
+import { PR_ACTION_PREFIX, handlePrCardAction } from "../pr-cards";
 import { modelLabel } from "../models";
 import { ensureProjectClaudeMd, runUserMessage, compactCurrentSession, agentDirKey, killRun, consumeUserStopped } from "../runner";
 import { getSettings, loadSettings } from "../config";
@@ -1853,6 +1854,15 @@ async function handleBlockAction(payload: any): Promise<void> {
 
   const action = actions[0] as (typeof actions)[number] & { url?: string };
   const actionId = action.action_id;
+
+  if (actionId.startsWith(PR_ACTION_PREFIX)) {
+    if (actionId === `${PR_ACTION_PREFIX}open`) return;
+    const note = await handlePrCardAction(actionId, action.value ?? "", user.id).catch((err) => `That didn't work: ${err instanceof Error ? err.message : err}`);
+    if (note) {
+      await slackApi(config.botToken, "chat.postEphemeral", { channel: channelId, user: user.id, text: note, ...(message?.thread_ts ? { thread_ts: message.thread_ts } : {}) }).catch(() => {});
+    }
+    return;
+  }
 
   if (actionId === LINK_ACTION_ID || action.url) return;
 
