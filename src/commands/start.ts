@@ -365,6 +365,10 @@ export async function start(args: string[] = []) {
       }
       if (await startSlackTools().catch((err) => { console.error(`[${ts()}] Slack tools failed to start:`, err); return false; })) {
         console.log(`[${ts()}] Slack tools: ready`);
+        const { ensurePrCardPoller } = await import("../pr-cards");
+        const { ensureScheduler } = await import("../schedules");
+        ensurePrCardPoller();
+        ensureScheduler();
       }
       console.log(`[${ts()}] Isolation: each person's runs use their own OS user; ${currentSettings.multiUser.protectedRepos.length} protected repo(s)`);
     } else {

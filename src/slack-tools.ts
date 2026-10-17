@@ -417,6 +417,47 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
       return { results: data.results, next_cursor: data.response_metadata?.next_cursor ?? "" };
     },
   },
+  slack_post_pr_card: {
+    description: "Post a live card for a GitHub pull request in a channel or thread. It shows draft/ready, CI checks, reviews and diff size, keeps itself up to date until the PR is merged or closed, and has Open PR, Mark ready and Refresh buttons. Use it every time you open a PR for someone.",
+    schema: { type: "object", properties: { pr_url: { type: "string" }, channel: { type: "string" }, thread_ts: { type: "string" } }, required: ["pr_url", "channel"] },
+    handler: async (args, requester) => {
+      const channel = await resolveChannel(args.channel, requester, true);
+      checkWriteBudget(requester);
+      const { postPrCard } = await import("./pr-cards");
+      const card = await postPrCard(requester, String(args.pr_url), channel.id, args.thread_ts ? String(args.thread_ts) : undefined);
+      return { ...card, permalink: await permalink(card.channel, card.ts) };
+    },
+  },
+  schedule_create: {
+    description: "Create a recurring task that runs as the person asking and posts its result to a channel. cron is 5 fields (minute hour day-of-month month day-of-week) in the team's timezone; the workweek is Sunday to Thursday (0-4). prompt is the full instruction for each run. At most every 15 minutes, 10 per person.",
+    schema: { type: "object", properties: { name: { type: "string" }, cron: { type: "string" }, prompt: { type: "string" }, channel: { type: "string" } }, required: ["name", "cron", "prompt", "channel"] },
+    handler: async (args, requester) => {
+      const channel = await resolveChannel(args.channel, requester, true);
+      const { createSchedule } = await import("./schedules");
+      const { schedule, next } = await createSchedule(requester, { name: args.name, cron: args.cron, prompt: args.prompt, channel: channel.id });
+      console.log(`[${new Date().toLocaleTimeString()}] Schedules: ${requester} created ${schedule.id} "${schedule.name}" (${schedule.cron})`);
+      return { id: schedule.id, name: schedule.name, cron: schedule.cron, channel: `<#${channel.id}>`, next_runs: next };
+    },
+  },
+  schedule_list: {
+    description: "List the recurring tasks the person asking has set up, with their next runs.",
+    schema: { type: "object", properties: {} },
+    handler: async (_args, requester) => (await import("./schedules")).listSchedules(requester),
+  },
+  schedule_delete: {
+    description: "Delete one of the person's recurring tasks by id.",
+    schema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    handler: async (args, requester) => ({ deleted: await (await import("./schedules")).deleteSchedule(requester, String(args.id)) }),
+  },
+  schedule_run_now: {
+    description: "Run one of the person's recurring tasks right away (to try it out). Its result posts to its channel like a scheduled run.",
+    schema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    handler: async (args, requester) => {
+      const { runScheduleNow } = await import("./schedules");
+      void runScheduleNow(requester, String(args.id)).catch(() => {});
+      return { started: true, note: "The result will post to the schedule's channel when the run finishes." };
+    },
+  },
   slack_get_permalink: {
     description: "Get the permalink of a message.",
     schema: { type: "object", properties: { channel: { type: "string" }, ts: { type: "string" } }, required: ["channel", "ts"] },
