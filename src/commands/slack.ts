@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { watchRunMeta, type RunMeta } from "../runner";
-import { TaskStream } from "../slack-stream";
+import { TaskStream, MAX_STREAMED_ANSWER } from "../slack-stream";
 import { rememberActionToken } from "../slack-tools";
 import { audit } from "../audit";
 import { PR_ACTION_PREFIX, handlePrCardAction } from "../pr-cards";
@@ -1677,10 +1677,12 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     }
 
     const stopped = consumeUserStopped(cancelKey);
+    let pendingStream: TaskStream | null = null;
+    const streamFooter = () => runStatusLine(runMeta, Date.now() - startedAt);
     if (stream) {
       const failed = !stopped && result.exitCode !== 0;
-      const title = stopped ? "Stopped" : failed ? "Something went wrong" : `Done${stream.steps ? ` — ${stream.steps} step${stream.steps === 1 ? "" : "s"}` : ""}`;
-      await stream.finish(title, failed || stopped ? "error" : "complete", runStatusLine(runMeta, Date.now() - startedAt));
+      if (stopped || failed) await stream.finish(stopped ? "Stopped" : "Something went wrong", "error", streamFooter());
+      else pendingStream = stream;
       if (progressTs) await deleteMessage(config.botToken, channelId, progressTs);
       progressTs = null;
     }
@@ -1701,6 +1703,10 @@ async function handleMessage(event: SlackMessage): Promise<void> {
         await sendMessage(config.botToken, channelId, "⏹ Stopped.", replyThreadTs);
       }
     } else if (result.exitCode !== 0 || authFailed) {
+      if (pendingStream) {
+        await pendingStream.finish("Something went wrong", "error", streamFooter());
+        pendingStream = null;
+      }
       await removeReaction(config.botToken, channelId, event.ts, "hourglass_flowing_sand");
       await clearAssistantStatus(config.botToken, channelId, replyThreadTs);
       const detail = extractErrorDetail(result) || "";
@@ -1727,12 +1733,20 @@ async function handleMessage(event: SlackMessage): Promise<void> {
 
       const reuseProgress = !!progressTs && !!finalText && !buttons && !select && finalText.length <= 3800;
       recordedReply = finalText || editContent || "";
+      let answeredInStream = false;
+      if (pendingStream) {
+        const doneTitle = `Done${pendingStream.steps ? ` — ${pendingStream.steps} step${pendingStream.steps === 1 ? "" : "s"}` : ""}`;
+        const inline = !!blockText.trim() && !buttons && !select && blockText.length <= MAX_STREAMED_ANSWER;
+        answeredInStream = await pendingStream.finish(doneTitle, "complete", streamFooter(), inline ? blockText.trim() : undefined);
+        pendingStream = null;
+      }
 
       if (reactionEmoji) {
         await sendReaction(config.botToken, channelId, event.ts, reactionEmoji);
       }
 
       const msgKey = botMessageKey(channelId, replyThreadTs);
+      if (answeredInStream) lastBotMessageTs.set(msgKey, stream!.ts);
 
       if (deleteCount !== 0 || deleteMatches.length > 0) {
         try {
@@ -1845,7 +1859,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
             await deleteMessage(config.botToken, channelId, progressTs);
           }
         }
-        if (finalText) {
+        if (finalText && !answeredInStream) {
           let sentTs: string | null = null;
           if (buttons || select) {
             sentTs = await sendBlockKitMessage(config.botToken, channelId, finalText, buttons, select, replyThreadTs);
@@ -1857,7 +1871,7 @@ async function handleMessage(event: SlackMessage): Promise<void> {
             }
           }
           if (sentTs) lastBotMessageTs.set(msgKey, sentTs);
-        } else if (!editContent && deleteCount === 0 && uploads.length === 0 && channelReads.length === 0) {
+        } else if (!answeredInStream && !finalText && !editContent && deleteCount === 0 && uploads.length === 0 && channelReads.length === 0) {
           const sentTs = await postMessage(config.botToken, channelId, "(empty response)", replyThreadTs);
           if (sentTs) lastBotMessageTs.set(msgKey, sentTs);
         }

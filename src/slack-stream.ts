@@ -1,6 +1,8 @@
 const SLACK_API = "https://slack.com/api";
 const FLUSH_MS = 1500;
 const CHUNK_TEXT_MAX = 250;
+const ANSWER_CHUNK = 3000;
+export const MAX_STREAMED_ANSWER = 11000;
 
 type TaskStatus = "in_progress" | "complete" | "error";
 const DONE: TaskStatus = "complete";
@@ -18,7 +20,12 @@ interface PlanChunk {
   title: string;
 }
 
-type Chunk = TaskChunk | PlanChunk;
+interface TextChunk {
+  type: "markdown_text";
+  text: string;
+}
+
+type Chunk = TaskChunk | PlanChunk | TextChunk;
 
 function clip(text: string, max = CHUNK_TEXT_MAX): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -137,13 +144,24 @@ export class TaskStream {
     return this.flushing;
   }
 
-  async finish(title: string, status: "complete" | "error", footer?: string): Promise<void> {
+  async finish(title: string, status: "complete" | "error", footer?: string, answer?: string): Promise<boolean> {
     if (this.timer) clearInterval(this.timer);
     for (const id of this.open) this.queue.push({ type: "task_update", id, title: this.titles.get(id) ?? id, status: status === "complete" ? DONE : "error" });
     this.open.clear();
     await this.flush();
     await this.flushing;
     const chunks: Chunk[] = [{ type: "plan_update", title: clip(title) }];
+    let answered = false;
+    if (answer && !this.broken) {
+      try {
+        for (let i = 0; i < answer.length; i += ANSWER_CHUNK) {
+          await call(this.token, "chat.appendStream", { channel: this.channel, ts: this.ts, chunks: [{ type: "markdown_text", text: answer.slice(i, i + ANSWER_CHUNK) }] });
+        }
+        answered = true;
+      } catch (err) {
+        console.error(`[${new Date().toLocaleTimeString()}] Slack stream answer failed, posting it separately: ${err instanceof Error ? err.message : err}`);
+      }
+    }
     try {
       await call(this.token, "chat.stopStream", {
         channel: this.channel,
@@ -154,6 +172,7 @@ export class TaskStream {
     } catch (err) {
       console.error(`[${new Date().toLocaleTimeString()}] Slack stream stop failed: ${err instanceof Error ? err.message : err}`);
     }
+    return answered;
   }
 
   static async stopOrphan(token: string, channel: string, ts: string, title: string): Promise<void> {
