@@ -728,7 +728,7 @@ async function fetchThreadHistory(
   channelId: string,
   threadTs: string,
   limit: number = 20,
-): Promise<{ role: string; text: string; user?: string; ts: string; files?: SlackFile[] }[]> {
+): Promise<{ role: string; text: string; user?: string; ts: string; files?: SlackFile[]; username?: string }[]> {
   const params = new URLSearchParams({
     channel: channelId,
     ts: threadTs,
@@ -746,6 +746,7 @@ async function fetchThreadHistory(
       text: string;
       user?: string;
       bot_id?: string;
+      username?: string;
       ts: string;
       files?: SlackFile[];
     }>;
@@ -756,6 +757,7 @@ async function fetchThreadHistory(
 
   return (data.messages ?? []).map((msg) => ({
     role: msg.bot_id ? "assistant" : "user",
+    username: msg.username,
     text: msg.text,
     user: msg.user,
     ts: msg.ts,
@@ -770,13 +772,14 @@ async function slackUserLabel(token: string, userId: string): Promise<string> {
 
 async function formatThreadHistoryAsContext(
   token: string,
-  messages: { role: string; text: string; user?: string; ts: string }[],
+  messages: { role: string; text: string; user?: string; ts: string; username?: string }[],
+  heading = "Thread History (previous messages)",
 ): Promise<string> {
   if (messages.length === 0) return "";
 
-  const lines = ["--- Thread History (previous messages) ---"];
+  const lines = [`--- ${heading} ---`];
   for (const msg of messages) {
-    const sender = msg.role === "assistant" ? "Bot" : msg.user ? await slackUserLabel(token, msg.user) : "unknown";
+    const sender = msg.role === "assistant" ? msg.username || "Bot" : msg.user ? await slackUserLabel(token, msg.user) : "unknown";
     lines.push(`[${sender}]: ${await withNames(token, msg.text)}`);
   }
   lines.push("--- End of Thread History ---");
@@ -789,6 +792,30 @@ const NAME_TTL_MS = 6 * 60 * 60 * 1000;
 const userNames = new Map<string, { name: string; at: number }>();
 const channelInfos = new Map<string, { info: SlackChannelInfo | null; at: number }>();
 const deliveredLinks = new Map<string, Set<string>>();
+const THREAD_SEEN_FILE = join(process.cwd(), ".claude", "kafu", "thread-seen.json");
+let threadSeen: Record<string, string> | null = null;
+let threadSeenWrite: Promise<void> = Promise.resolve();
+
+async function threadSeenTs(key: string): Promise<string | undefined> {
+  if (!threadSeen) {
+    try {
+      threadSeen = JSON.parse(await Bun.file(THREAD_SEEN_FILE).text()) as Record<string, string>;
+    } catch {
+      threadSeen = {};
+    }
+  }
+  return threadSeen[key];
+}
+
+async function markThreadSeen(key: string, ts: string): Promise<void> {
+  await threadSeenTs(key);
+  threadSeen![key] = ts;
+  threadSeenWrite = threadSeenWrite.then(async () => {
+    await Bun.write(`${THREAD_SEEN_FILE}.tmp`, JSON.stringify(threadSeen) + "\n");
+    await rename(`${THREAD_SEEN_FILE}.tmp`, THREAD_SEEN_FILE);
+  }).catch(() => {});
+  await threadSeenWrite;
+}
 
 interface SlackChannelInfo {
   name?: string;
@@ -1383,22 +1410,30 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     }
 
     let threadHistoryContext = "";
-    if (inThread && sessionThreadId && !threadHistoryLoaded.has(sessionThreadId)) {
-      const existingSession = await peekThreadSession(sessionThreadId);
-      if (!existingSession) {
-        try {
-          const history = await fetchThreadHistory(config.botToken, channelId, event.thread_ts!, 20);
-          const pastMessages = history
-            .filter((m) => m.ts !== event.ts)
-            .map((m) => ({ ...m, text: sanitizeUserInput(m.text) }));
-          if (pastMessages.length > 0) {
-            threadHistoryContext = await formatThreadHistoryAsContext(config.botToken, pastMessages);
-            debugLog(`Loaded ${pastMessages.length} thread history messages for ${sessionThreadId}`);
-          }
-        } catch (err) {
-          debugLog(`Failed to load thread history: ${err instanceof Error ? err.message : err}`);
+    if (inThread && sessionThreadId) {
+      try {
+        const existingSession = await peekThreadSession(sessionThreadId);
+        const seen = existingSession ? await threadSeenTs(sessionThreadId) : undefined;
+        const ownName = actingUserId ? postingAs.getStore()?.username ?? (await postAsRequester(config.botToken, actingUserId)) : undefined;
+        const history = await fetchThreadHistory(config.botToken, channelId, event.thread_ts!, 200);
+        const fresh = history
+          .filter((m) => m.ts !== event.ts && Number(m.ts) < Number(event.ts))
+          .filter((m) => !seen || Number(m.ts) > Number(seen))
+          .filter((m) => !(existingSession && m.role === "assistant" && (ownName ? m.username === ownName : !isMultiUser())))
+          .slice(-80)
+          .map((m) => ({ ...m, text: sanitizeUserInput(m.text) }));
+        if (fresh.length > 0 && (!existingSession || seen)) {
+          threadHistoryContext = await formatThreadHistoryAsContext(
+            config.botToken,
+            fresh,
+            existingSession ? "New messages in this thread since your last reply" : "Thread History (previous messages)",
+          );
+          debugLog(`Loaded ${fresh.length} thread messages for ${sessionThreadId}`);
         }
+      } catch (err) {
+        debugLog(`Failed to load thread history: ${err instanceof Error ? err.message : err}`);
       }
+      await markThreadSeen(sessionThreadId, event.ts);
       threadHistoryLoaded.set(sessionThreadId, Date.now());
     }
 
