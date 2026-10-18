@@ -168,7 +168,8 @@ export function decide(input: GuardInput, ctx: GuardContext): string | null {
     }
     const policy = githubPolicy(command, cwd, ctx);
     if (policy) return policy;
-    if (MEMORY_REF.test(command) && FILE_WRITE.test(command)) {
+    const outsideKafuData = command.replace(/[^\s'"`]*\/\.claude\/kafu\/[^\s'"`]*/g, " ");
+    if (MEMORY_REF.test(outsideKafuData) && FILE_WRITE.test(command)) {
       return "My instruction files (CLAUDE.md, .claude settings) can't be changed from a chat.";
     }
     return null;

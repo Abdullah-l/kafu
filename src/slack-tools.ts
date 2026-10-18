@@ -539,14 +539,29 @@ async function handleRequest(line: string): Promise<ToolResult> {
   return runTool(String(request.tool ?? ""), (request.args as Record<string, any>) ?? {}, requester);
 }
 
+function flushReply(socket: { data: { out?: Buffer; sent: number }; write(data: Uint8Array): number; end(): void }): void {
+  const out = socket.data.out;
+  if (!out) return;
+  while (socket.data.sent < out.length) {
+    const written = socket.write(out.subarray(socket.data.sent));
+    if (written <= 0) return;
+    socket.data.sent += written;
+  }
+  socket.data.out = undefined;
+  socket.end();
+}
+
 export async function startSlackTools(): Promise<boolean> {
   if (!isolationEnabled() || !getSettings().slack.botToken) return false;
   await rm(SLACK_SOCKET, { force: true });
-  Bun.listen<{ buffer: string; handled: boolean }>({
+  Bun.listen<{ buffer: string; handled: boolean; out?: Buffer; sent: number }>({
     unix: SLACK_SOCKET,
     socket: {
       open(socket) {
-        socket.data = { buffer: "", handled: false };
+        socket.data = { buffer: "", handled: false, sent: 0 };
+      },
+      drain(socket) {
+        flushReply(socket);
       },
       data(socket, chunk) {
         if (socket.data.handled) return;
@@ -559,7 +574,9 @@ export async function startSlackTools(): Promise<boolean> {
         if (newline < 0) return;
         socket.data.handled = true;
         void handleRequest(socket.data.buffer.slice(0, newline)).then((result) => {
-          socket.end(JSON.stringify(result) + "\n");
+          socket.data.out = Buffer.from(JSON.stringify(result) + "\n");
+          socket.data.sent = 0;
+          flushReply(socket);
         });
       },
     },

@@ -120,3 +120,17 @@ describe("guard: GitHub policy", () => {
     expect(bash("gh run view 123 --log-failed")).toBeNull();
   });
 });
+
+describe("guard: kafu data paths", () => {
+  test("allows working with attachments and the temp folder under .claude/kafu", () => {
+    expect(bash("cp /workspace/.claude/kafu/inbox/slack/F0ABC-doc.pdf $TMPDIR/doc.pdf")).toBeNull();
+    expect(bash("python3 extract.py /workspace/.claude/kafu/users/U1/tmp/snb.pdf --out /workspace/.claude/kafu/users/U1/tmp/images")).toBeNull();
+    expect(bash("pdfimages -png '/workspace/.claude/kafu/inbox/slack/F0ABC-doc.pdf' /workspace/.claude/kafu/users/U1/tmp/img")).toBeNull();
+  });
+
+  test("still blocks writing instruction files", () => {
+    expect(bash("cp /workspace/.claude/kafu/inbox/slack/F0ABC-notes.md /workspace/CLAUDE.md")).not.toBeNull();
+    expect(bash("echo '{}' > .claude/settings.json")).not.toBeNull();
+    expect(bash("cp evil.md ~/.claude/skills/x.md")).not.toBeNull();
+  });
+});
