@@ -20,6 +20,7 @@ import { recordTurn, getAssistantName, setAssistantName, onConversationDeleted, 
 import { mkdir, realpath, rename } from "node:fs/promises";
 import { dirname, extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
+import { fetchWithTimeout } from "../http";
 
 const SLACK_DIRECTIVES_PATH = join(import.meta.dir, "..", "..", "prompts", "slack", "DIRECTIVES.md");
 let slackDirectivesPrompt: string | null = null;
@@ -206,7 +207,7 @@ async function slackApi<T = Record<string, unknown>>(
 ): Promise<T> {
   const as = postingAs.getStore()?.username;
   if (as && method === "chat.postMessage" && params.username === undefined) params = { ...params, username: as };
-  const res = await fetch(`${SLACK_API}/${method}`, {
+  const res = await fetchWithTimeout(`${SLACK_API}/${method}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -228,7 +229,7 @@ async function slackApi<T = Record<string, unknown>>(
 }
 
 async function slackGet<T = Record<string, unknown>>(token: string, method: string, params: Record<string, string>): Promise<T> {
-  const res = await fetch(`${SLACK_API}/${method}?${new URLSearchParams(params)}`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetchWithTimeout(`${SLACK_API}/${method}?${new URLSearchParams(params)}`, { headers: { Authorization: `Bearer ${token}` } });
   const data = (await res.json()) as { ok: boolean; error?: string } & T;
   if (!data.ok) throw new Error(`Slack API ${method} error: ${data.error ?? "unknown"}`);
   return data;
@@ -707,7 +708,7 @@ async function fetchBotMessages(
       limit: String(limit),
       inclusive: "true",
     });
-    const res = await fetch(`${SLACK_API}/conversations.replies?${params}`, {
+    const res = await fetchWithTimeout(`${SLACK_API}/conversations.replies?${params}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -738,7 +739,7 @@ async function fetchThreadHistory(
     limit: String(limit),
     inclusive: "true",
   });
-  const res = await fetch(`${SLACK_API}/conversations.replies?${params}`, {
+  const res = await fetchWithTimeout(`${SLACK_API}/conversations.replies?${params}`, {
     method: "GET",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1033,9 +1034,9 @@ async function downloadSlackFile(
   const dir = join(process.cwd(), ".claude", "kafu", "inbox", "slack");
   await mkdir(dir, { recursive: true });
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
-  });
+  }, 120_000);
   if (!res.ok) {
     throw new Error(`Slack file download failed: ${res.status}`);
   }
@@ -1079,7 +1080,7 @@ async function uploadFile(
     filename,
     length: String(bytes.byteLength),
   });
-  const step1Res = await fetch(`${SLACK_API}/files.getUploadURLExternal?${params}`, {
+  const step1Res = await fetchWithTimeout(`${SLACK_API}/files.getUploadURLExternal?${params}`, {
     method: "GET",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1088,11 +1089,11 @@ async function uploadFile(
     throw new Error(`files.getUploadURLExternal error: ${step1Data.error ?? "missing upload_url"}`);
   }
 
-  const uploadRes = await fetch(step1Data.upload_url, {
+  const uploadRes = await fetchWithTimeout(step1Data.upload_url, {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },
     body: bytes,
-  });
+  }, 120_000);
   if (!uploadRes.ok) {
     throw new Error(`File upload failed: ${uploadRes.status}`);
   }
@@ -1153,7 +1154,7 @@ async function fetchChannelHistory(
     channel: channelId,
     limit: String(limit),
   });
-  const res = await fetch(`${SLACK_API}/conversations.history?${params}`, {
+  const res = await fetchWithTimeout(`${SLACK_API}/conversations.history?${params}`, {
     method: "GET",
     headers: { Authorization: `Bearer ${token}` },
   });

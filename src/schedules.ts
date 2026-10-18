@@ -5,6 +5,7 @@ import { getSettings } from "./config";
 import { getRunIdentity } from "./users";
 import { agentDirKey, runUserMessage } from "./runner";
 import { removeThreadSession } from "./sessionManager";
+import { fetchWithTimeout } from "./http";
 
 const STATE_FILE = join(process.cwd(), ".claude", "kafu", "schedules.json");
 const TICK_MS = 20_000;
@@ -156,7 +157,7 @@ export async function deleteSchedule(owner: string, id: string): Promise<boolean
 }
 
 async function slack(method: string, body: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`https://slack.com/api/${method}`, {
+  const res = await fetchWithTimeout(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${getSettings().slack.botToken}`, "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify(body),

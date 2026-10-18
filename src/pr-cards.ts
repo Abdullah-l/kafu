@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { readFile, rename, writeFile, mkdir } from "node:fs/promises";
 import { getSettings } from "./config";
 import { getUser } from "./users";
+import { fetchWithTimeout } from "./http";
 
 const STATE_FILE = join(process.cwd(), ".claude", "kafu", "pr-cards.json");
 const POLL_MS = 2 * 60_000;
@@ -68,7 +69,7 @@ export function parsePrUrl(url: string): { repo: string; number: number } | null
 }
 
 async function gh<T>(token: string, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`https://api.github.com${path}`, {
+  const res = await fetchWithTimeout(`https://api.github.com${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "kafu", ...(init?.headers ?? {}) },
   });
@@ -171,7 +172,7 @@ function hashOf(s: PrSummary): string {
 }
 
 async function slack(method: string, body: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`https://slack.com/api/${method}`, {
+  const res = await fetchWithTimeout(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${getSettings().slack.botToken}`, "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify(body),

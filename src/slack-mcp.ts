@@ -8,9 +8,16 @@ function send(message: unknown): void {
   process.stdout.write(JSON.stringify(message) + "\n");
 }
 
+const CALL_TIMEOUT_MS = 150_000;
+
 function callBroker(tool: string, args: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }> {
   return readRunToken().then((token) => new Promise((resolve) => {
     const socket = connect(SLACK_SOCKET);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      resolve({ ok: false, error: `${tool} didn't finish within ${CALL_TIMEOUT_MS / 1000}s; Slack may be slow. Try again or continue without it.` });
+    }, CALL_TIMEOUT_MS);
+    socket.on("close", () => clearTimeout(timer));
     let out = "";
     socket.on("connect", () => socket.write(JSON.stringify({ token, tool, args }) + "\n"));
     socket.on("data", (d) => { out += d; });

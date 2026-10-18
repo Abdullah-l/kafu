@@ -1,4 +1,5 @@
 import { mkdir, rm } from "node:fs/promises";
+import { fetchWithTimeout } from "./http";
 
 const CODE_RE = /one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/;
 const URL_RE = /(https:\/\/github\.com\/login\/device)/;
@@ -44,7 +45,7 @@ export function cancelAppLogin(key: string): void {
 }
 
 async function postForm(url: string, body: Record<string, string>): Promise<Record<string, any>> {
-  const res = await fetch(url, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await fetchWithTimeout(url, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify(body) });
   return (await res.json()) as Record<string, any>;
 }
 

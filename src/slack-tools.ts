@@ -2,6 +2,7 @@ import { chmod, rm } from "node:fs/promises";
 import { getSettings } from "./config";
 import { verifyRunToken } from "./run-token";
 import { isolationEnabled } from "./isolation";
+import { fetchWithTimeout } from "./http";
 
 export const SLACK_SOCKET = "/run/kafu-slack.sock";
 const SLACK_API = "https://slack.com/api";
@@ -67,14 +68,14 @@ function token(): string {
 async function slackGet<T>(method: string, params: Record<string, string | number | boolean | undefined>): Promise<T> {
   const query = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") query.set(k, String(v));
-  const res = await fetch(`${SLACK_API}/${method}?${query}`, { headers: { Authorization: `Bearer ${token()}` } });
+  const res = await fetchWithTimeout(`${SLACK_API}/${method}?${query}`, { headers: { Authorization: `Bearer ${token()}` } });
   const data = (await res.json()) as { ok: boolean; error?: string } & T;
   if (!data.ok) throw new Error(`${method}: ${data.error ?? "failed"}`);
   return data;
 }
 
 async function slackPost<T>(method: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${SLACK_API}/${method}`, {
+  const res = await fetchWithTimeout(`${SLACK_API}/${method}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify(body),
@@ -358,7 +359,7 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
       const channel = await resolveChannel(args.channel, requester, true);
       checkWriteBudget(requester);
       const target = await slackGet<{ upload_url: string; file_id: string }>("files.getUploadURLExternal", { filename, length: data.length });
-      const put = await fetch(target.upload_url, { method: "POST", body: data });
+      const put = await fetchWithTimeout(target.upload_url, { method: "POST", body: data }, 120_000);
       if (!put.ok) throw new Error(`upload failed: HTTP ${put.status}`);
       await slackPost("files.completeUploadExternal", {
         files: [{ id: target.file_id, title: String(args.title ?? filename) }],
@@ -387,7 +388,7 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
       }
       if (!allowed) throw new Error("that file isn't in a conversation you can see");
       if ((file.size ?? 0) > MAX_UPLOAD_BYTES) throw new Error("files over 25 MB can't be downloaded here");
-      const res = await fetch(file.url_private_download ?? file.url_private, { headers: { Authorization: `Bearer ${token()}` } });
+      const res = await fetchWithTimeout(file.url_private_download ?? file.url_private, { headers: { Authorization: `Bearer ${token()}` } }, 120_000);
       if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
       return { name: file.name, mimetype: file.mimetype, content_base64: Buffer.from(await res.arrayBuffer()).toString("base64") };
     },
@@ -428,7 +429,7 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
     },
   },
   ask_question: {
-    description: "Ask the person a question in their Slack thread and wait for the answer, like asking in Claude Code. Use it when you need a decision you can't make yourself: unclear requirements, choosing between approaches, or confirming before something others will see. Give 2-5 options when you can; each can be a full sentence (they're shown as a numbered list with a button per number), and they can also reply in their own words. Waits up to 25 minutes, then returns timedOut so you can continue with your best judgment and say so.",
+    description: "Ask the person a question in their Slack thread and wait for the answer, like asking in Claude Code. If they haven't answered within about 100 seconds it returns pending with a question_id; then call wait_for_answer until it resolves. Use it when you need a decision you can't make yourself: unclear requirements, choosing between approaches, or confirming before something others will see. Give 2-5 options when you can; each can be a full sentence (they're shown as a numbered list with a button per number), and they can also reply in their own words. The question expires after 25 minutes and returns timedOut, so you can continue with your best judgment and say so.",
     schema: {
       type: "object",
       properties: {
@@ -441,8 +442,8 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
     },
     handler: async (args, requester) => {
       const channel = await resolveChannel(args.channel, requester, true);
-      const { askQuestion } = await import("./questions");
-      return askQuestion({
+      const { askQuestion, waitForAnswer } = await import("./questions");
+      const id = await askQuestion({
         requester,
         channel: channel.id,
         threadTs: String(args.thread_ts),
@@ -450,7 +451,13 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
         options: Array.isArray(args.options) ? args.options.map(String) : [],
         username: await postingName(requester),
       });
+      return waitForAnswer(id, requester);
     },
+  },
+  wait_for_answer: {
+    description: "Keep waiting for the answer to a question you asked with ask_question, when it came back pending. Waits about 100 seconds per call; call it again while it's still pending.",
+    schema: { type: "object", properties: { question_id: { type: "string" } }, required: ["question_id"] },
+    handler: async (args, requester) => (await import("./questions")).waitForAnswer(String(args.question_id), requester),
   },
   slack_post_pr_card: {
     description: "Post a live card for a GitHub pull request in a channel or thread. It shows draft/ready, CI checks, reviews and diff size, keeps itself up to date until the PR is merged or closed, and has Open PR, Mark ready and Refresh buttons. Use it every time you open a PR for someone.",

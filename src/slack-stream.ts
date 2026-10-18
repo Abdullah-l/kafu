@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from "./http";
+
 const SLACK_API = "https://slack.com/api";
 const FLUSH_MS = 1500;
 const CHUNK_TEXT_MAX = 250;
@@ -33,7 +35,7 @@ function clip(text: string, max = CHUNK_TEXT_MAX): string {
 }
 
 async function call(token: string, method: string, body: Record<string, unknown>): Promise<Record<string, any>> {
-  const res = await fetch(`${SLACK_API}/${method}`, {
+  const res = await fetchWithTimeout(`${SLACK_API}/${method}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify(body),

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { getSettings } from "./config";
+import { fetchWithTimeout } from "./http";
 
 export const ASK_ACTION_PREFIX = "kafu_ask:";
 const WAIT_MS = 25 * 60_000;
@@ -9,6 +10,24 @@ export interface QuestionAnswer {
   answer?: string;
   via?: "button" | "reply";
   timedOut?: boolean;
+}
+
+export interface QuestionStatus extends QuestionAnswer {
+  question_id: string;
+  pending?: boolean;
+  note?: string;
+}
+
+const answers = new Map<string, { requester: string; result: Promise<QuestionAnswer> }>();
+const ROUND_MS = 100_000;
+
+export async function waitForAnswer(id: string, requester: string, ms = ROUND_MS): Promise<QuestionStatus> {
+  const entry = answers.get(id);
+  if (!entry || entry.requester !== requester) throw new Error("no question with that id for you");
+  const timer = new Promise<null>((resolve) => setTimeout(() => resolve(null), ms));
+  const result = await Promise.race([entry.result, timer]);
+  if (!result) return { question_id: id, pending: true, note: "No answer yet. Call wait_for_answer with this question_id to keep waiting; it expires 25 minutes after asking." };
+  return { question_id: id, ...result };
 }
 
 interface PendingQuestion {
@@ -26,7 +45,7 @@ interface PendingQuestion {
 const pending = new Map<string, PendingQuestion>();
 
 async function slack(method: string, body: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`https://slack.com/api/${method}`, {
+  const res = await fetchWithTimeout(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${getSettings().slack.botToken}`, "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify(body),
@@ -56,7 +75,7 @@ async function settle(q: PendingQuestion, answer: QuestionAnswer, note: string):
   q.resolve(answer);
 }
 
-export async function askQuestion(opts: { requester: string; channel: string; threadTs?: string; question: string; options: string[]; username?: string }): Promise<QuestionAnswer> {
+export async function askQuestion(opts: { requester: string; channel: string; threadTs?: string; question: string; options: string[]; username?: string }): Promise<string> {
   const options = opts.options.map((o) => plain(String(o), 600)).filter(Boolean).slice(0, 5);
   const question = String(opts.question ?? "").trim();
   if (!question) throw new Error("question is required");
@@ -78,7 +97,7 @@ export async function askQuestion(opts: { requester: string; channel: string; th
     ...(opts.threadTs ? { thread_ts: opts.threadTs } : {}),
     ...(opts.username ? { username: opts.username } : {}),
   });
-  return new Promise<QuestionAnswer>((resolve) => {
+  const result = new Promise<QuestionAnswer>((resolve) => {
     const q: PendingQuestion = {
       id,
       requester: opts.requester,
@@ -94,6 +113,9 @@ export async function askQuestion(opts: { requester: string; channel: string; th
     };
     pending.set(id, q);
   });
+  answers.set(id, { requester: opts.requester, result });
+  void result.then(() => setTimeout(() => answers.delete(id), 60 * 60_000));
+  return id;
 }
 
 export async function answerFromButton(actionId: string, userId: string): Promise<string | null> {
