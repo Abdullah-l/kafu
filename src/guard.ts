@@ -18,6 +18,7 @@ const PROTECTED_BRANCH = /^(develop|main|master)$/;
 const MERGE_REASON = "Merging is done by people on GitHub after review; I can open and update PRs but not merge them.";
 const SETTINGS_REASON = "I can't change repository or organization settings, secrets, workflows or releases; ask someone with access to do it on GitHub.";
 const BRANCH_REASON = "I can't push to or delete develop, main or master; I push my own branch and open a PR instead.";
+const HOOK_REASON = "Pushes have to go through the repo's git hooks; fix what they report and push again.";
 const ALLOWED_MUTATIONS = new Set([
   "addComment", "addPullRequestReview", "addPullRequestReviewComment", "addPullRequestReviewThread", "submitPullRequestReview",
   "createPullRequest", "updatePullRequest", "markPullRequestReadyForReview", "convertPullRequestToDraft", "requestReviews",
@@ -70,6 +71,7 @@ function gitPushReason(segment: string, cwd: string, ctx: GuardContext): string 
   if (at < 0 || !w.slice(0, at).some((x) => x === "git" || x.endsWith("/git"))) return null;
   const args = w.slice(at + 1);
   if (args.some((a) => ["--delete", "-d", "--mirror", "--all", "--tags", "--prune"].includes(a))) return BRANCH_REASON;
+  if (args.includes("--no-verify")) return HOOK_REASON;
   const positional = args.filter((a) => !a.startsWith("-"));
   const refspecs = positional.slice(1);
   const branchOf = (spec: string): string => spec.replace(/^\+/, "").split(":").pop()!.replace(/^refs\/heads\//, "");
@@ -92,6 +94,7 @@ function gitPushReason(segment: string, cwd: string, ctx: GuardContext): string 
 export function githubPolicy(command: string, cwd: string, ctx: GuardContext): string | null {
   for (const segment of splitCommands(command)) {
     if (/\bgh\s+pr\s+merge\b/.test(segment)) return MERGE_REASON;
+    if (/core\.hookspath|GIT_CONFIG_(COUNT|KEY|VALUE|PARAMETERS)/i.test(segment)) return HOOK_REASON;
     if (/\bgh\s+repo\s+(edit|delete|archive|unarchive|rename|deploy-key|set-default|sync|autolink)\b/.test(segment)) return SETTINGS_REASON;
     if (/\bgh\s+(secret|variable|ruleset|ssh-key|gpg-key|org|codespace|attestation)\b/.test(segment)) return SETTINGS_REASON;
     if (/\bgh\s+(workflow\s+(run|enable|disable)|run\s+(rerun|cancel|delete)|release\s+(create|delete|edit|upload|delete-asset)|cache\s+delete|label\s+(create|edit|delete|clone))\b/.test(segment)) return SETTINGS_REASON;

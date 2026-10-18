@@ -106,6 +106,14 @@ describe("guard: GitHub policy", () => {
     branches[normalCheckout] = "ABC-1270";
   });
 
+  test("blocks skipping the pre-push hook", () => {
+    expect(bash("git push --no-verify origin ABC-1270", normalCheckout)).toContain("git hooks");
+    expect(bash("git -c core.hooksPath=/dev/null push origin ABC-1270", normalCheckout)).not.toBeNull();
+    expect(bash("git config --global core.hooksPath ~/hooks")).not.toBeNull();
+    expect(bash("GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp git push", normalCheckout)).not.toBeNull();
+    expect(bash("git push -n origin ABC-1270", normalCheckout)).toBeNull();
+  });
+
   test("allows the normal PR workflow", () => {
     expect(bash("git push -u origin ABC-1270", normalCheckout)).toBeNull();
     expect(bash("git push --force-with-lease origin ABC-1270", normalCheckout)).toBeNull();
