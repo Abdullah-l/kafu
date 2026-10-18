@@ -224,6 +224,7 @@ export async function prepareSandbox(opts: {
   await chownTree(opts.configDir, opts.uid);
   await ownedDir(opts.homeDir, opts.uid);
   await ownedDir(join(opts.userDir, "tmp"), opts.uid);
+  await chownTree(join(opts.userDir, "tmp"), opts.uid);
   await stripMemory(join(opts.homeDir, ".claude"));
   if (opts.workDir) {
     await ownedDir(opts.workDir, opts.uid);
@@ -309,7 +310,7 @@ export async function hardenWorkspace(): Promise<void> {
     const dir = join(users, id);
     await rootOnly(dir, 0o711);
     for (const entry of await readdir(dir)) {
-      if (entry === "claude" || entry === "home") continue;
+      if (entry === "claude" || entry === "home" || entry === "tmp") continue;
       await lockTree(join(dir, entry));
     }
   }
