@@ -101,9 +101,9 @@ describe("runStatusLine", () => {
 
   test("shows model and context usage", () => {
     expect(runStatusLine({ model: "claude-opus-5-5", contextTokens: 42_300, contextWindow: 200_000 }, 83_000))
-      .toBe("⏱ 1m 23s   🧠 Opus 5.5   📚 42k / 200k context (21%)");
+      .toBe("⏱ 1m 23s   🧠 Opus 5.5   📚 79% left (158k of 200k)");
     expect(runStatusLine({ model: "claude-sonnet-5-5[1m]", contextTokens: 250_000, contextWindow: 1_000_000 }, 3_725_000))
-      .toBe("⏱ 1h 02m   🧠 Sonnet 5.5   📚 250k / 1M context (25%)");
+      .toBe("⏱ 1h 02m   🧠 Sonnet 5.5   📚 75% left (750k of 1M)");
   });
 
   test("formats elapsed time", () => {

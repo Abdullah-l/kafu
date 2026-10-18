@@ -427,6 +427,31 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
       return { results: data.results, next_cursor: data.response_metadata?.next_cursor ?? "" };
     },
   },
+  ask_question: {
+    description: "Ask the person a question in their Slack thread and wait for the answer, like asking in Claude Code. Use it when you need a decision you can't make yourself: unclear requirements, choosing between approaches, or confirming before something others will see. Give 2-5 short options when you can; they can also reply in their own words. Waits up to 25 minutes, then returns timedOut so you can continue with your best judgment and say so.",
+    schema: {
+      type: "object",
+      properties: {
+        question: { type: "string" },
+        options: { type: "array", items: { type: "string" }, maxItems: 5 },
+        channel: { type: "string" },
+        thread_ts: { type: "string" },
+      },
+      required: ["question", "channel", "thread_ts"],
+    },
+    handler: async (args, requester) => {
+      const channel = await resolveChannel(args.channel, requester, true);
+      const { askQuestion } = await import("./questions");
+      return askQuestion({
+        requester,
+        channel: channel.id,
+        threadTs: String(args.thread_ts),
+        question: String(args.question ?? ""),
+        options: Array.isArray(args.options) ? args.options.map(String) : [],
+        username: await postingName(requester),
+      });
+    },
+  },
   slack_post_pr_card: {
     description: "Post a live card for a GitHub pull request in a channel or thread. It shows draft/ready, CI checks, reviews and diff size, keeps itself up to date until the PR is merged or closed, and has Open PR, Mark ready and Refresh buttons. Use it every time you open a PR for someone.",
     schema: { type: "object", properties: { pr_url: { type: "string" }, channel: { type: "string" }, thread_ts: { type: "string" } }, required: ["pr_url", "channel"] },
@@ -481,7 +506,7 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
 export async function runTool(name: string, args: Record<string, any>, requester: string): Promise<ToolResult> {
   const tool = TOOLS[name];
   if (!tool) return { ok: false, error: `unknown tool ${name}` };
-  const writes = /post|upload|update|delete|reaction|schedule_|pr_card/.test(name);
+  const writes = /post|upload|update|delete|reaction|schedule_|pr_card|ask_question/.test(name);
   try {
     const result = await tool.handler(args ?? {}, requester);
     if (writes) {

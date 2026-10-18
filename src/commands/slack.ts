@@ -4,6 +4,7 @@ import { TaskStream } from "../slack-stream";
 import { rememberActionToken } from "../slack-tools";
 import { audit } from "../audit";
 import { PR_ACTION_PREFIX, handlePrCardAction } from "../pr-cards";
+import { ASK_ACTION_PREFIX, answerFromButton } from "../questions";
 import { modelLabel } from "../models";
 import { ensureProjectClaudeMd, runUserMessage, compactCurrentSession, agentDirKey, killRun, consumeUserStopped } from "../runner";
 import { getSettings, loadSettings } from "../config";
@@ -376,8 +377,10 @@ export function runStatusLine(meta: RunMeta, elapsedMs: number): string {
   const parts = [`⏱ ${formatElapsed(elapsedMs)}`];
   if (meta.model) parts.push(`🧠 ${modelLabel(meta.model.replace(/\[1m\]$/i, ""))}`);
   if (meta.contextTokens) {
-    const window = meta.contextWindow ?? 200_000;
-    parts.push(`📚 ${formatTokens(meta.contextTokens)} / ${formatTokens(window)} context (${Math.round((meta.contextTokens / window) * 100)}%)`);
+    const compactAt = Number(process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW);
+    const window = Math.min(meta.contextWindow ?? 200_000, Number.isFinite(compactAt) && compactAt > 0 ? compactAt : Infinity);
+    const left = Math.max(window - meta.contextTokens, 0);
+    parts.push(`📚 ${Math.round((left / window) * 100)}% left (${formatTokens(left)} of ${formatTokens(window)})`);
   }
   return parts.join("   ");
 }
@@ -1375,6 +1378,14 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     }
   }
 
+  if (event.thread_ts && userId && cleanText.trim()) {
+    const { answerFromReply } = await import("../questions");
+    if (await answerFromReply(channelId, event.thread_ts, userId, cleanText.trim())) {
+      await sendReaction(config.botToken, channelId, event.ts, "white_check_mark");
+      return;
+    }
+  }
+
   const label = userId;
   const mediaParts = [hasImage ? "image" : "", hasVoice ? "voice" : ""].filter(Boolean);
   const mediaSuffix = mediaParts.length > 0 ? ` [${mediaParts.join("+")}]` : "";
@@ -1933,6 +1944,14 @@ async function handleBlockAction(payload: any): Promise<void> {
 
   const action = actions[0] as (typeof actions)[number] & { url?: string };
   const actionId = action.action_id;
+
+  if (actionId.startsWith(ASK_ACTION_PREFIX)) {
+    const note = await answerFromButton(actionId, user.id).catch((err) => `That didn't work: ${err instanceof Error ? err.message : err}`);
+    if (note) {
+      await slackApi(config.botToken, "chat.postEphemeral", { channel: channelId, user: user.id, text: note, ...(message?.thread_ts ? { thread_ts: message.thread_ts } : {}) }).catch(() => {});
+    }
+    return;
+  }
 
   if (actionId.startsWith(PR_ACTION_PREFIX)) {
     if (actionId === `${PR_ACTION_PREFIX}open`) return;
