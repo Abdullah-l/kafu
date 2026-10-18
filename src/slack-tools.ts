@@ -258,7 +258,7 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
     },
   },
   slack_find_channels: {
-    description: "Find Slack channels by name or topic. Private channels are listed only if you're in them.",
+    description: "Find Slack channels by name or topic. Private channels show up only if both the person asking and this bot are members.",
     schema: { type: "object", properties: { query: { type: "string" } } },
     handler: async (args, requester) => {
       const found = [];
@@ -272,7 +272,7 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
     },
   },
   slack_read_messages: {
-    description: "Read a channel's recent messages, or a thread's replies. Pass a channel (ID, #name or user ID for your DM with the bot) or a message permalink. Add thread_ts to read a thread.",
+    description: "Read a channel's recent messages, or a thread's replies. Pass a channel (ID, #name or user ID for the asker's DM with the bot) or a message permalink. Add thread_ts to read a thread. Public channels always work (the bot joins if needed). Private channels and group DMs work when the person asking is a member and the bot has been invited; if the bot isn't in it, ask them to /invite it.",
     schema: { type: "object", properties: { channel: { type: "string" }, permalink: { type: "string" }, thread_ts: { type: "string" }, limit: { type: "number" }, oldest: { type: "string" }, latest: { type: "string" } } },
     handler: async (args, requester) => {
       const link = args.permalink ? parsePermalink(args.permalink) : null;
@@ -393,7 +393,7 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
     },
   },
   slack_search: {
-    description: "Search Slack messages, files, channels or people with the asker's access (public channels, plus the private channel the request came from). Supports natural-language queries. Use after/before (unix seconds) to limit dates, channel to search one channel.",
+    description: "Search Slack messages, files, channels or people. Covers public channels plus the private channel the request came from; Slack doesn't let bots search other private channels or DMs, so for a specific private channel the asker and bot are both in, read it with slack_read_messages instead. Supports natural-language queries. Use after/before (unix seconds) to limit dates, channel to search one channel.",
     schema: {
       type: "object",
       properties: {
