@@ -110,6 +110,7 @@ export class TaskStream {
       const title = clip(`${friendlyTool(parsed.tool)}${parsed.detail ? `: ${parsed.detail}` : ""}`);
       this.titles.set(id, title);
       this.queue.push({ type: "task_update", id, title, status: "in_progress" });
+      this.queue.push({ type: "plan_update", title: clip(`Working: ${friendlyTool(parsed.tool)}${parsed.detail ? ` ${parsed.detail}` : ""}`, 90) + ` (step ${this.count})` });
     } else {
       const id = this.pending.get(parsed.tool)?.shift();
       if (!id) return;
@@ -120,7 +121,10 @@ export class TaskStream {
 
   private merged(): Chunk[] {
     const out: Chunk[] = [];
-    for (const chunk of this.queue.splice(0)) {
+    const queued = this.queue.splice(0);
+    const lastPlan = queued.map((c) => c.type).lastIndexOf("plan_update");
+    for (const [index, chunk] of queued.entries()) {
+      if (chunk.type === "plan_update" && index !== lastPlan) continue;
       const earlier = chunk.type === "task_update" ? (out.find((c) => c.type === "task_update" && c.id === chunk.id) as TaskChunk | undefined) : undefined;
       if (earlier && chunk.type === "task_update") {
         earlier.status = chunk.status;
