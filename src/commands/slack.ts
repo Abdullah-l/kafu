@@ -1327,6 +1327,15 @@ async function handleMessage(event: SlackMessage): Promise<void> {
   const isAssistantThread = event.thread_ts
     ? assistantThreadKeys.has(assistantKey(channelId, event.thread_ts))
     : false;
+  if (event.thread_ts && event.user && !event.bot_id && event.text?.trim()) {
+    const { answerFromReply } = await import("../questions");
+    const reply = botUserId ? event.text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim() : event.text.trim();
+    if (reply && await answerFromReply(channelId, event.thread_ts, event.user, reply)) {
+      await sendReaction(config.botToken, channelId, event.ts, "white_check_mark");
+      return;
+    }
+  }
+
   if (!isDirectMessage && !mentioned && !isListenChannel && !isAssistantThread && !isBotAllowed) {
     debugLog(`Skip channel=${channelId} user=${userId} text="${event.text.slice(0, 40)}"`);
     return;
@@ -1374,14 +1383,6 @@ async function handleMessage(event: SlackMessage): Promise<void> {
     } catch (err) {
       console.error(`[Slack] Account handling failed for ${userId}: ${err instanceof Error ? err.message : err}`);
       await sendMessage(config.botToken, channelId, "Something went wrong with your account setup. Try again in a moment.", event.thread_ts ?? event.ts);
-      return;
-    }
-  }
-
-  if (event.thread_ts && userId && cleanText.trim()) {
-    const { answerFromReply } = await import("../questions");
-    if (await answerFromReply(channelId, event.thread_ts, userId, cleanText.trim())) {
-      await sendReaction(config.botToken, channelId, event.ts, "white_check_mark");
       return;
     }
   }
