@@ -508,8 +508,8 @@ export function emitRunMeta(key: string | undefined, meta: RunMeta): void {
   try { metaListeners.get(key)?.(meta); } catch {}
 }
 
-function contextWindowFor(...models: string[]): number {
-  return models.some((m) => /\[1m\]/i.test(m)) ? 1_000_000 : 200_000;
+export function contextWindowFor(...models: string[]): number {
+  return models.some((m) => /\[1m\]/i.test(m) || /claude-(opus|sonnet|fable|haiku)-([5-9]|\d{2})|claude-opus-4-([7-9]|\d{2})/i.test(m)) ? 1_000_000 : 200_000;
 }
 
 export async function runClaudeStream(
@@ -564,6 +564,10 @@ export async function runClaudeStream(
           }
           if (event.type === "result" && typeof event.result === "string") {
             resultText = event.result;
+          }
+          if (cancelKey && event.type === "result" && event.modelUsage && typeof event.modelUsage === "object") {
+            const usage = Object.values(event.modelUsage as Record<string, { contextWindow?: number }>).find((u) => typeof u?.contextWindow === "number");
+            if (usage?.contextWindow) emitRunMeta(cancelKey, { contextWindow: usage.contextWindow });
           }
           if (cancelKey && event.type === "system" && event.subtype === "init" && typeof event.model === "string") {
             initModel = event.model;

@@ -135,3 +135,17 @@ describe("markdownToMrkdwn", () => {
     expect(markdownToMrkdwn("__init__ and 2*3*4 and <@U123ABC> *done*")).toBe("__init__ and 2*3*4 and <@U123ABC> _done_");
   });
 });
+
+describe("context window", () => {
+  test("knows which models have a 1M window", async () => {
+    const { contextWindowFor } = await import("../runner");
+    expect(contextWindowFor("claude-opus-5-5")).toBe(1_000_000);
+    expect(contextWindowFor("claude-sonnet-5-5")).toBe(1_000_000);
+    expect(contextWindowFor("claude-haiku-5-5")).toBe(1_000_000);
+    expect(contextWindowFor("claude-opus-4-7")).toBe(1_000_000);
+    expect(contextWindowFor("claude-opus-4-6[1m]")).toBe(1_000_000);
+    expect(contextWindowFor("claude-opus-4-6")).toBe(200_000);
+    expect(contextWindowFor("claude-haiku-4-5-20251001")).toBe(200_000);
+    expect(contextWindowFor("", "")).toBe(200_000);
+  });
+});
