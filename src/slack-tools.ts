@@ -428,7 +428,7 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
     },
   },
   ask_question: {
-    description: "Ask the person a question in their Slack thread and wait for the answer, like asking in Claude Code. Use it when you need a decision you can't make yourself: unclear requirements, choosing between approaches, or confirming before something others will see. Give 2-5 short options when you can; they can also reply in their own words. Waits up to 25 minutes, then returns timedOut so you can continue with your best judgment and say so.",
+    description: "Ask the person a question in their Slack thread and wait for the answer, like asking in Claude Code. Use it when you need a decision you can't make yourself: unclear requirements, choosing between approaches, or confirming before something others will see. Give 2-5 options when you can; each can be a full sentence (they're shown as a numbered list with a button per number), and they can also reply in their own words. Waits up to 25 minutes, then returns timedOut so you can continue with your best judgment and say so.",
     schema: {
       type: "object",
       properties: {

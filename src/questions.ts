@@ -3,6 +3,7 @@ import { getSettings } from "./config";
 
 export const ASK_ACTION_PREFIX = "kafu_ask:";
 const WAIT_MS = 25 * 60_000;
+const BUTTON_LABEL_MAX = 28;
 
 export interface QuestionAnswer {
   answer?: string;
@@ -56,16 +57,19 @@ async function settle(q: PendingQuestion, answer: QuestionAnswer, note: string):
 }
 
 export async function askQuestion(opts: { requester: string; channel: string; threadTs?: string; question: string; options: string[]; username?: string }): Promise<QuestionAnswer> {
-  const options = opts.options.map((o) => plain(String(o), 75)).filter(Boolean).slice(0, 5);
+  const options = opts.options.map((o) => plain(String(o), 600)).filter(Boolean).slice(0, 5);
   const question = String(opts.question ?? "").trim();
   if (!question) throw new Error("question is required");
   const id = randomBytes(6).toString("hex");
+  const short = options.every((o) => o.length <= BUTTON_LABEL_MAX);
+  const list = options.map((o, i) => `*${i + 1}.* ${o}`).join("\n");
   const blocks: Record<string, unknown>[] = [
-    { type: "section", text: { type: "mrkdwn", text: `<@${opts.requester}> ❓ ${question}` } },
+    { type: "section", text: { type: "mrkdwn", text: `<@${opts.requester}> ❓ ${question}`.slice(0, 2900) } },
+    ...(options.length ? [{ type: "section", text: { type: "mrkdwn", text: list.slice(0, 2900) } }] : []),
     ...(options.length
-      ? [{ type: "actions", elements: options.map((label, i) => ({ type: "button", text: { type: "plain_text", text: label }, action_id: `${ASK_ACTION_PREFIX}${id}:${i}`, value: String(i) })) }]
+      ? [{ type: "actions", elements: options.map((label, i) => ({ type: "button", text: { type: "plain_text", text: short ? `${i + 1}. ${label}` : String(i + 1) }, action_id: `${ASK_ACTION_PREFIX}${id}:${i}`, value: String(i) })) }]
       : []),
-    { type: "context", elements: [{ type: "mrkdwn", text: options.length ? "Pick one, or reply in this thread to answer in your own words." : "Reply in this thread to answer." }] },
+    { type: "context", elements: [{ type: "mrkdwn", text: options.length ? "Pick a number, or reply in this thread to answer in your own words." : "Reply in this thread to answer." }] },
   ];
   const sent = await slack("chat.postMessage", {
     channel: opts.channel,
@@ -99,7 +103,7 @@ export async function answerFromButton(actionId: string, userId: string): Promis
   if (userId !== q.requester) return "Only the person who asked can answer this one.";
   const choice = q.options[Number(index)];
   if (choice === undefined) return null;
-  await settle(q, { answer: choice, via: "button" }, `✅ <@${userId}> picked *${choice}*`);
+  await settle(q, { answer: choice, via: "button" }, `✅ <@${userId}> picked *${Number(index) + 1}. ${plain(choice, 280)}*`);
   return null;
 }
 
