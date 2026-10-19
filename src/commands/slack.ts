@@ -2480,7 +2480,7 @@ export function startSlack(debug = false): void {
   if (config.publicChannelsOnly) console.log("  Channels: public only");
   if (config.watchChannels.length) console.log(`  Watching: ${config.watchChannels.map((w) => w.channel).join(", ")}`);
   if (sharedAccountEnabled()) console.log(`  Claude account: shared (admins: ${getSettings().multiUser.sharedAccount.admins.join(", ") || "none"})`);
-  if (isMultiUser()) console.log("  Multi-user: each person signs in with their own Claude account");
+  if (isMultiUser() && !sharedAccountEnabled()) console.log("  Multi-user: each person signs in with their own Claude account");
   if (config.listenChannels.length > 0) {
     console.log(`  Listen channels: ${config.listenChannels.join(", ")}`);
   }
