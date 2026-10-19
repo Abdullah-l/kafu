@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile, chmod } from "node:fs/promises";
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
+import { getSettings } from "./config";
 
 const KAFU_DIR = join(process.cwd(), ".claude", "kafu");
 const USERS_DIR = join(KAFU_DIR, "users");
@@ -189,11 +190,32 @@ export async function setUserModel(userId: string, model: string): Promise<void>
   await updateUser(userId, (user) => { user.model = model.trim(); });
 }
 
+export const SHARED_ACCOUNT_ID = "shared";
+
+export function sharedAccountEnabled(): boolean {
+  try {
+    const { multiUser } = getSettings();
+    return multiUser.enabled && multiUser.sharedAccount.enabled;
+  } catch {
+    return false;
+  }
+}
+
+export function isAccountAdmin(userId: string): boolean {
+  return sharedAccountEnabled() && getSettings().multiUser.sharedAccount.admins.includes(userId);
+}
+
+export function claudeAccountOwner(userId: string): string {
+  return sharedAccountEnabled() ? SHARED_ACCOUNT_ID : userId;
+}
+
 export async function getRunIdentity(userId: string): Promise<RunIdentity | null> {
+  if (userId === SHARED_ACCOUNT_ID && sharedAccountEnabled()) return null;
   const user = await getUser(userId);
-  if (!user?.token) return null;
+  const account = sharedAccountEnabled() ? await getUser(SHARED_ACCOUNT_ID) : user;
+  if (!account?.token) return null;
   const configDir = userConfigDir(userId);
   await mkdir(configDir, { recursive: true, mode: 0o700 });
   await chmod(userDir(userId), 0o700).catch(() => {});
-  return { userId, token: user.token, configDir, model: user.model, secrets: user.secrets };
+  return { userId, token: account.token, configDir, model: account.model, secrets: user?.secrets ?? {} };
 }

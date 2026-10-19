@@ -173,6 +173,10 @@ async function resolveChannel(ref: string, requester: string, forWrite: boolean)
     if (!hit) throw new Error(`no channel named #${value} that I can see`);
     channel = hit;
   }
+  const slackConfig = getSettings().slack;
+  if (slackConfig.publicChannelsOnly && (channel.is_im || channel.is_private || channel.is_mpim) && !slackConfig.watchChannels.some((w) => w.channel === channel.id)) {
+    throw new Error("I only work with public channels");
+  }
   if (channel.is_im) {
     if (!forWrite && channel.user !== requester) throw new Error("you can only read your own direct messages with the bot");
   } else if (channel.is_private || channel.is_mpim) {

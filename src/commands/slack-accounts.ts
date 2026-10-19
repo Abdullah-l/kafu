@@ -1,5 +1,5 @@
 import { CLAUDE_EXECUTABLE } from "../runner";
-import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir, userScratchDir, setUserSecret, clearUserSecret } from "../users";
+import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir, userScratchDir, setUserSecret, clearUserSecret, sharedAccountEnabled, isAccountAdmin, claudeAccountOwner } from "../users";
 import { startGhDeviceLogin, cancelGhLogin } from "../gh-login";
 import { startLogin, submitLoginCode, cancelLogin, hasPendingLogin, pendingLoginUrl, looksLikeLoginCode } from "../login";
 import { MODELS, modelLabel } from "../models";
@@ -33,7 +33,14 @@ export async function sendPortalLink(userId: string, io: AccountIO, intro: strin
   else await io.dm(text);
 }
 
+export function sharedAccountDownText(): string {
+  const admins = getSettings().multiUser.sharedAccount.admins;
+  const who = admins.length ? admins.map((a) => `<@${a}>`).join(" ") : "An admin";
+  return `I can't think right now: my Claude sign-in isn't working. ${who} can sign me in again by mentioning me with \`connect\`.`;
+}
+
 async function handlePortalMode(userId: string, lower: string, respond: (text: string) => Promise<void>, io: AccountIO): Promise<boolean> {
+  const sharedMember = sharedAccountEnabled() && !isAccountAdmin(userId);
   if (lower === "help") {
     await respond([
       "Ask me anything: mention me where you're working.",
@@ -45,18 +52,24 @@ async function handlePortalMode(userId: string, lower: string, respond: (text: s
     return true;
   }
   if (/^(login|logout|connect|connections|disconnect|whoami|account|settings)(\s+[a-z0-9_-]+)?$/.test(lower)) {
-    await sendPortalLink(userId, io, "Manage your connections here:");
+    if (sharedMember && credentialSpecs().length === 0) {
+      await respond("There's nothing to connect: I'm ready to use. Mention me with your question.");
+      return true;
+    }
+    await sendPortalLink(userId, io, sharedAccountEnabled() && !sharedMember ? "Manage my shared Claude account here:" : "Manage your connections here:");
     return true;
   }
   const model = lower.match(/^model(?:\s+(\S+))?$/);
   if (model) {
     if (!model[1]) {
-      const user = await getUser(userId);
-      await respond(`Your model: ${user?.model ? modelLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`}\n\nChange it with \`model <name>\`:\n${modelList()}\n• \`default\` — use the bot default`);
+      const user = await getUser(claudeAccountOwner(userId));
+      await respond(`${sharedAccountEnabled() ? "Model" : "Your model"}: ${user?.model ? modelLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`}\n\nChange it with \`model <name>\`:\n${modelList()}\n• \`default\` — use the bot default`);
       return true;
     }
     const result = await changeModel(userId, model[1]);
-    await respond(result.ok ? (model[1] === "default" ? "Back to the default model." : `Switched to ${modelLabel(resolveModel(model[1])!)}.`) : `I don't know that model. Pick one of:\n${modelList()}`);
+    await respond(result.ok
+      ? (model[1] === "default" ? "Back to the default model." : `Switched to ${modelLabel(resolveModel(model[1])!)}.`)
+      : result.error === "Unknown model" ? `I don't know that model. Pick one of:\n${modelList()}` : result.error ?? "That didn't work.");
     return true;
   }
   return false;
@@ -169,6 +182,11 @@ function modelList(): string {
 }
 
 export async function sendLoginLink(userId: string, io: AccountIO, fromChannel: boolean, fresh = false): Promise<void> {
+  if (sharedAccountEnabled()) {
+    if (portalEnabled() && isAccountAdmin(userId)) await sendPortalLink(userId, io, "My shared Claude account isn't signed in. Sign it in here, then ask again:");
+    else await io.reply(sharedAccountDownText());
+    return;
+  }
   if (portalEnabled()) {
     await sendPortalLink(userId, io, "Connect your Claude account first, then come back and ask again:");
     return;

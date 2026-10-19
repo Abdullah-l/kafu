@@ -60,8 +60,8 @@ const DEFAULT_SETTINGS: Settings = {
   timezone: "UTC",
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
-  slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false },
-  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], tempFileTtlDays: 14, sharedCache: null, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
+  slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, watchChannels: [] },
+  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], tempFileTtlDays: 14, sharedCache: null, sharedAccount: { enabled: false, admins: [] }, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
@@ -89,6 +89,61 @@ export interface SlackConfig {
   allowBots: string[];
   allowBotIds: string[];
   assistantStatus: boolean;
+  publicChannelsOnly: boolean;
+  watchChannels: WatchChannel[];
+}
+
+export interface WatchChannel {
+  channel: string;
+  prompt: string;
+  from: "all" | "bots" | "people";
+  runAs: string;
+  model: string;
+  dedupeMinutes: number;
+  ignorePatterns: string[];
+  maxQueue: number;
+}
+
+export interface SharedAccountConfig {
+  enabled: boolean;
+  admins: string[];
+}
+
+const DEFAULT_DEDUPE_IGNORE = [
+  "\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:?\\d{2})?",
+  "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+];
+
+function parseWatchChannels(value: unknown): WatchChannel[] {
+  if (!Array.isArray(value)) return [];
+  const out: WatchChannel[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const channel = typeof entry.channel === "string" ? entry.channel.trim() : "";
+    const prompt = typeof entry.prompt === "string" ? entry.prompt.trim() : "";
+    if (!/^[CG][A-Z0-9]{6,}$/.test(channel) || !prompt || out.some((w) => w.channel === channel)) continue;
+    const runAs = typeof entry.runAs === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(entry.runAs.trim()) ? entry.runAs.trim() : "watcher";
+    const patterns = Array.isArray(entry.ignorePatterns) ? entry.ignorePatterns.filter((p: unknown): p is string => typeof p === "string") : DEFAULT_DEDUPE_IGNORE;
+    out.push({
+      channel,
+      prompt,
+      from: entry.from === "bots" || entry.from === "people" ? entry.from : "all",
+      runAs,
+      model: typeof entry.model === "string" ? entry.model.trim() : "",
+      dedupeMinutes: Number.isFinite(entry.dedupeMinutes) && Number(entry.dedupeMinutes) >= 0 ? Number(entry.dedupeMinutes) : 30,
+      ignorePatterns: patterns.filter((p: string) => {
+        try {
+          new RegExp(p, "gi");
+          return true;
+        } catch {
+          console.warn(`[config] Ignoring invalid watch pattern for ${channel}: ${p}`);
+          return false;
+        }
+      }),
+      maxQueue: Number.isInteger(entry.maxQueue) && entry.maxQueue > 0 ? Number(entry.maxQueue) : 10,
+    });
+  }
+  return out;
 }
 
 export interface CredentialSpec {
@@ -142,6 +197,7 @@ export interface MultiUserConfig {
   protectedRepos: string[];
   tempFileTtlDays: number;
   sharedCache: SharedCacheConfig | null;
+  sharedAccount: SharedAccountConfig;
 }
 
 export type SecurityLevel =
@@ -324,6 +380,8 @@ function parseSettings(raw: Record<string, any>): Settings {
       allowBots: Array.isArray(raw.slack?.allowBots) ? raw.slack.allowBots.map(String) : [],
       allowBotIds: Array.isArray(raw.slack?.allowBotIds) ? raw.slack.allowBotIds.map(String) : [],
       assistantStatus: raw.slack?.assistantStatus === true,
+      publicChannelsOnly: raw.slack?.publicChannelsOnly === true,
+      watchChannels: parseWatchChannels(raw.slack?.watchChannels),
     },
     multiUser: {
       enabled: raw.multiUser?.enabled === true,
@@ -331,6 +389,10 @@ function parseSettings(raw: Record<string, any>): Settings {
       credentials: parseCredentials(raw.multiUser?.credentials),
       directMessages: raw.multiUser?.directMessages !== false,
       sharedCache: parseSharedCache(raw.multiUser?.sharedCache),
+      sharedAccount: {
+        enabled: raw.multiUser?.sharedAccount?.enabled === true,
+        admins: Array.isArray(raw.multiUser?.sharedAccount?.admins) ? raw.multiUser.sharedAccount.admins.filter((a: unknown): a is string => typeof a === "string" && /^[UW][A-Z0-9]+$/.test(a)) : [],
+      },
       tempFileTtlDays: Number.isFinite(raw.multiUser?.tempFileTtlDays) && Number(raw.multiUser.tempFileTtlDays) > 0 ? Number(raw.multiUser.tempFileTtlDays) : 14,
       protectedRepos: Array.isArray(raw.multiUser?.protectedRepos)
         ? raw.multiUser.protectedRepos.filter((r: unknown): r is string => typeof r === "string" && /^[\w.-]+\/[\w.-]+$/.test(r.trim())).map((r: string) => r.trim())

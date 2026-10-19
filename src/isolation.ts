@@ -333,8 +333,8 @@ export function guardSettings(repos: string[], runtime?: string, script?: string
   };
 }
 
-export async function writeManagedSettings(repos: string[]): Promise<void> {
-  const settings = { ...guardSettings(repos), allowManagedHooksOnly: true };
+export async function writeManagedSettings(repos: string[], deniedTools: string[] = []): Promise<void> {
+  const settings = { ...guardSettings(repos), allowManagedHooksOnly: true, ...(deniedTools.length ? { permissions: { deny: deniedTools } } : {}) };
   await mkdir(dirname(MANAGED_SETTINGS), { recursive: true });
   await writeFile(MANAGED_SETTINGS, JSON.stringify(settings, null, 2) + "\n", { mode: 0o644 });
   await chown(MANAGED_SETTINGS, 0, 0);

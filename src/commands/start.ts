@@ -353,7 +353,7 @@ export async function start(args: string[] = []) {
   if (currentSettings.multiUser.enabled) {
     if (isolationEnabled()) {
       await hardenWorkspace();
-      await writeManagedSettings(currentSettings.multiUser.protectedRepos);
+      await writeManagedSettings(currentSettings.multiUser.protectedRepos, currentSettings.security.disallowedTools);
       const prune = async () => {
         const days = getSettings().multiUser.tempFileTtlDays;
         const report = await pruneTemporaryFiles(days).catch(() => null);

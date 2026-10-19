@@ -1,5 +1,5 @@
 import { CLAUDE_EXECUTABLE } from "./runner";
-import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir, userScratchDir, setUserSecret, clearUserSecret } from "./users";
+import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir, userScratchDir, setUserSecret, clearUserSecret, claudeAccountOwner, sharedAccountEnabled, isAccountAdmin } from "./users";
 import { startGhDeviceLogin, startAppDeviceLogin, cancelGhLogin } from "./gh-login";
 import { startLogin, submitLoginCode, cancelLogin, pendingLoginUrl } from "./login";
 import { MODELS, modelLabel } from "./models";
@@ -24,7 +24,7 @@ export interface ServiceStatus {
 
 export interface AccountStatus {
   userId: string;
-  claude: { connected: boolean; model: string; modelLabel: string; signInUrl: string | null };
+  claude: { connected: boolean; model: string; modelLabel: string; signInUrl: string | null; shared: boolean; canManage: boolean };
   defaultModel: string;
   models: { id: string; label: string; description: string }[];
   services: ServiceStatus[];
@@ -37,7 +37,14 @@ export interface Result {
 }
 
 const deviceStates = new Map<string, DeviceState>();
-const claudeLoginKey = (userId: string) => `slack:${userId}`;
+const claudeLoginKey = (userId: string) => `slack:${claudeAccountOwner(userId)}`;
+
+export const SHARED_ACCOUNT_ADMIN_ONLY = "Only the bot's admins can change its shared Claude account.";
+
+function claudeOwnerFor(userId: string): string {
+  if (sharedAccountEnabled() && !isAccountAdmin(userId)) throw new Error(SHARED_ACCOUNT_ADMIN_ONLY);
+  return claudeAccountOwner(userId);
+}
 const deviceKey = (userId: string, id: string) => `${userId}:${id}`;
 
 export function credentialSpecs(): CredentialSpec[] {
@@ -62,14 +69,19 @@ export function resolveModel(input: string): string | null {
 
 export async function accountStatus(userId: string): Promise<AccountStatus> {
   const user = await getUser(userId);
+  const shared = sharedAccountEnabled();
+  const account = shared ? await getUser(claudeAccountOwner(userId)) : user;
+  const canManage = !shared || isAccountAdmin(userId);
   const defaultModel = getSettings().model || "Claude Code default";
   return {
     userId,
     claude: {
-      connected: !!user?.token,
-      model: user?.model ?? "",
-      modelLabel: user?.model ? modelLabel(user.model) : `${defaultModel} (default)`,
-      signInUrl: user?.token ? null : pendingLoginUrl(claudeLoginKey(userId)),
+      connected: !!account?.token,
+      model: account?.model ?? "",
+      modelLabel: account?.model ? modelLabel(account.model) : `${defaultModel} (default)`,
+      signInUrl: account?.token || !canManage ? null : pendingLoginUrl(claudeLoginKey(userId)),
+      shared,
+      canManage,
     },
     defaultModel,
     models: MODELS.map((m) => ({ id: m.id, label: m.label, description: m.description })),
@@ -86,20 +98,24 @@ export async function accountStatus(userId: string): Promise<AccountStatus> {
 }
 
 export async function startClaudeLogin(userId: string, fresh = false): Promise<string> {
+  const owner = claudeOwnerFor(userId);
   const existing = fresh ? null : pendingLoginUrl(claudeLoginKey(userId));
-  return existing ?? startLogin(claudeLoginKey(userId), userConfigDir(userId), CLAUDE_EXECUTABLE);
+  return existing ?? startLogin(claudeLoginKey(userId), userConfigDir(owner), CLAUDE_EXECUTABLE);
 }
 
 export async function finishClaudeLogin(userId: string, code: string): Promise<Result> {
+  const owner = claudeOwnerFor(userId);
   const result = await submitLoginCode(claudeLoginKey(userId), code);
   if (!result.ok || !result.token) return { ok: false, error: result.error ?? "Sign-in failed" };
-  await saveUserToken(userId, result.token);
+  await saveUserToken(owner, result.token);
+  if (owner !== userId) console.log(`[${new Date().toLocaleTimeString()}] Accounts: ${userId} signed in the shared Claude account`);
   return { ok: true };
 }
 
 export async function logoutClaude(userId: string): Promise<boolean> {
+  const owner = claudeOwnerFor(userId);
   cancelLogin(claudeLoginKey(userId));
-  return clearUserToken(userId);
+  return clearUserToken(owner);
 }
 
 export async function connectWithSecret(userId: string, id: string, raw: string): Promise<Result> {
@@ -154,12 +170,14 @@ export async function disconnectService(userId: string, id: string): Promise<boo
 }
 
 export async function changeModel(userId: string, input: string): Promise<Result> {
+  if (sharedAccountEnabled() && !isAccountAdmin(userId)) return { ok: false, error: SHARED_ACCOUNT_ADMIN_ONLY };
+  const owner = claudeAccountOwner(userId);
   if (!input || input === "default") {
-    await setUserModel(userId, "");
+    await setUserModel(owner, "");
     return { ok: true };
   }
   const id = resolveModel(input);
   if (!id) return { ok: false, error: "Unknown model" };
-  await setUserModel(userId, id);
+  await setUserModel(owner, id);
   return { ok: true };
 }

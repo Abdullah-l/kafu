@@ -56,10 +56,14 @@
     var u = ui.claude || {};
     var body = [];
     var waiting = !c.connected && (u.url || c.signInUrl);
-    if (!c.connected) {
+    if (c.shared && !c.canManage) {
+      body.push(el("div", { class: "panel" }, [
+        el("div", { class: "help", text: c.connected ? "Everyone uses the same Claude account here. Only admins can change it." : "The Claude account isn't signed in. Ask an admin to sign it in." }),
+      ]));
+    } else if (!c.connected) {
       if (!waiting) {
         body.push(el("div", { class: "panel" }, [
-          el("div", { class: "help", text: "Use your own Claude Pro, Max, Team or Enterprise account." }),
+          el("div", { class: "help", text: c.shared ? "Everyone who talks to the bot uses this account. Sign in with the subscription set aside for it." : "Use your own Claude Pro, Max, Team or Enterprise account." }),
           el("div", { class: "actions" }, [el("button", { class: "primary", text: u.busy ? "Starting…" : "Sign in with Claude", onclick: startClaude })]),
         ]));
       } else {
@@ -86,15 +90,15 @@
       select.addEventListener("change", function () { api("/api/model", { model: select.value }).then(refresh); });
       body.push(el("div", { class: "panel" }, [
         el("div", { class: "field" }, [el("label", { for: "model", text: "Model" }), select]),
-        el("div", { class: "actions" }, [el("button", { class: "ghost danger", text: "Disconnect", onclick: function () { if (confirm("Disconnect your Claude account?")) api("/api/claude/logout", {}).then(refresh); } })]),
+        el("div", { class: "actions" }, [el("button", { class: "ghost danger", text: "Disconnect", onclick: function () { if (confirm(c.shared ? "Disconnect the shared Claude account? The bot stops working for everyone until someone signs in again." : "Disconnect your Claude account?")) api("/api/claude/logout", {}).then(refresh); } })]),
       ]));
     }
     if (u.error) body.push(el("div", { class: "error", text: u.error }));
     return stop(
       c.connected ? "on" : waiting ? "wait" : "",
-      "Claude", "Required",
+      c.shared ? "Claude (shared)" : "Claude", "Required",
       c.connected ? "Connected" : waiting ? "Waiting for code" : "Not connected",
-      c.connected ? null : "Everything else runs on this account.",
+      c.connected ? null : c.shared ? "Every conversation runs on this account." : "Everything else runs on this account.",
       body
     );
   }
