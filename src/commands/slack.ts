@@ -16,6 +16,7 @@ import { resolveSkillPrompt } from "../skills";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { getRunIdentity, sharedAccountEnabled, type RunIdentity } from "../users";
 import { watchFor, messageBody, shouldSkip, WatchState } from "../slack-watch";
+import { HANDOFF_ACTION_ID, handoffAvailable, createHandoffToken, readHandoff } from "../handoff";
 import type { WatchChannel } from "../config";
 import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, sharedAccountDownText, CONNECT_ACTION_PREFIX, LINK_ACTION_ID, type AccountIO } from "./slack-accounts";
 import { recordTurn, getAssistantName, setAssistantName, onConversationDeleted, threadSessionKey, type TurnStatus } from "../conversations";
@@ -1372,14 +1373,17 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
   const channelAllowed = !!event.bot_id && allowBots.includes(event.channel);
   const botIdAllowed = allowBotIds.length === 0 || (!!event.bot_id && allowBotIds.includes(event.bot_id));
   const isBotAllowed = !watched && channelAllowed && botIdAllowed;
+  const handoff = !watched && event.bot_id && event.thread_ts && config.acceptHandoffsFrom.includes(event.bot_id)
+    ? readHandoff(event.text, event.channel, event.thread_ts)
+    : null;
 
   if (!watched) {
-    if (event.bot_id) {
+    if (event.bot_id && !handoff) {
       if (event.user === botUserId) return;
       if (!isBotAllowed || isMultiUser()) return;
     }
     if (!event.bot_id && !event.user) return;
-    if (event.subtype && event.subtype !== "file_share" && !(isBotAllowed && event.subtype === "bot_message")) return;
+    if (event.subtype && event.subtype !== "file_share" && !(isBotAllowed && event.subtype === "bot_message") && !(handoff && event.subtype === "bot_message")) return;
 
     if (isDuplicate(event.channel, event.ts)) {
       debugLog(`Skipping duplicate: channel=${event.channel} ts=${event.ts}`);
@@ -1387,7 +1391,8 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
     }
   }
 
-  const userId = watched ? watched.watch.runAs : event.user ?? event.bot_profile?.name ?? event.username ?? event.bot_id;
+  const userId = watched ? watched.watch.runAs : handoff ? handoff.requester : event.user ?? event.bot_profile?.name ?? event.username ?? event.bot_id;
+  if (handoff) console.log(`[${new Date().toLocaleTimeString()}] Handoff from bot ${event.bot_id} for ${handoff.requester} in ${event.channel}:${event.thread_ts}`);
   const channelId = event.channel;
   const isDirectMessage = isDM(event);
 
@@ -1400,12 +1405,12 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
     return;
   }
   const isListenChannel = config.listenChannels.includes(channelId);
-  const mentioned = isBotMentioned(event.text);
+  const mentioned = !!handoff || isBotMentioned(event.text);
 
   const isAssistantThread = event.thread_ts
     ? assistantThreadKeys.has(assistantKey(channelId, event.thread_ts))
     : false;
-  if (!watched && event.thread_ts && event.user && !event.bot_id && event.text?.trim()) {
+  if (!watched && !handoff && event.thread_ts && event.user && !event.bot_id && event.text?.trim()) {
     const { answerFromReply } = await import("../questions");
     const reply = botUserId ? event.text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim() : event.text.trim();
     if (reply && await answerFromReply(channelId, event.thread_ts, event.user, reply)) {
@@ -1426,7 +1431,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
     return;
   }
 
-  let cleanText = watched ? watched.prompt : event.text;
+  let cleanText = watched ? watched.prompt : handoff ? handoff.text : event.text;
   if (botUserId && !watched) {
     cleanText = cleanText.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
   }
@@ -1940,12 +1945,15 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
         }
       }
 
+      const handoffBlocks: Record<string, unknown>[] = watched && config.handoff && handoffAvailable() && finalText && finalText.length <= 2900
+        ? [{ type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: config.handoff.label }, action_id: HANDOFF_ACTION_ID, value: "handoff" }] }]
+        : [];
       if (reuseProgress && progressTs) {
         await slackApi(config.botToken, "chat.update", {
           channel: channelId,
           ts: progressTs,
           text: finalText,
-          blocks: [],
+          blocks: handoffBlocks.length ? [{ type: "section", text: { type: "mrkdwn", text: finalText } }, ...handoffBlocks] : [],
         }).catch((err) => {
           debugLog(`answer-in-progress update failed: ${err instanceof Error ? err.message : err}`);
         });
@@ -1968,8 +1976,10 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
             for (let i = 0; i < finalText.length; i += MAX_LEN) {
               const chunk = finalText.slice(i, i + MAX_LEN);
               const last = i + MAX_LEN >= finalText.length;
-              const chunkTs = last && doneFooter && chunk.length <= 2900
-                ? await postBlocks(config.botToken, channelId, chunk, [{ type: "section", text: { type: "mrkdwn", text: chunk } }, { type: "context", elements: [{ type: "mrkdwn", text: doneFooter }] }], replyThreadTs)
+              const footerBlocks = last && doneFooter ? [{ type: "context", elements: [{ type: "mrkdwn", text: doneFooter }] }] : [];
+              const extraBlocks = last ? [...footerBlocks, ...handoffBlocks] : [];
+              const chunkTs = extraBlocks.length && chunk.length <= 2900
+                ? await postBlocks(config.botToken, channelId, chunk, [{ type: "section", text: { type: "mrkdwn", text: chunk } }, ...extraBlocks], replyThreadTs)
                 : await postMessage(config.botToken, channelId, chunk, replyThreadTs);
               if (chunkTs) sentTs = chunkTs;
             }
@@ -2037,6 +2047,24 @@ async function handleBlockAction(payload: any): Promise<void> {
     if (note) {
       await slackApi(config.botToken, "chat.postEphemeral", { channel: channelId, user: user.id, text: note, ...(message?.thread_ts ? { thread_ts: message.thread_ts } : {}) }).catch(() => {});
     }
+    return;
+  }
+
+  if (actionId === HANDOFF_ACTION_ID && config.handoff) {
+    const threadTs = message?.thread_ts ?? message?.ts;
+    if (!threadTs || !handoffAvailable()) return;
+    const { target, message: note } = config.handoff;
+    await postMessage(config.botToken, channelId, `<@${target}> <@${user.id}> ${note} [handoff:${createHandoffToken(user.id, channelId, threadTs)}]`, threadTs);
+    if (message?.ts) {
+      const kept = ((message as { blocks?: Record<string, unknown>[] }).blocks ?? []).filter((b) => b.type !== "actions");
+      await slackApi(config.botToken, "chat.update", {
+        channel: channelId,
+        ts: message.ts,
+        text: (message as { text?: string }).text ?? "",
+        blocks: [...kept, { type: "context", elements: [{ type: "mrkdwn", text: `Handed to <@${target}> by <@${user.id}>` }] }],
+      }).catch(() => {});
+    }
+    console.log(`[${new Date().toLocaleTimeString()}] Handoff: ${user.id} handed ${channelId}:${threadTs} to ${target}`);
     return;
   }
 
