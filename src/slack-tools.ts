@@ -52,6 +52,8 @@ export function rememberActionToken(userId: string, token: string): void {
 const posted = new Map<string, string>();
 
 export async function postingName(requester: string): Promise<string | undefined> {
+  const { sharedAccountEnabled } = await import("./users");
+  if (sharedAccountEnabled()) return undefined;
   const full = await nameOf(requester).catch(() => "");
   const first = full.trim().split(/\s+/)[0];
   if (!first) return undefined;

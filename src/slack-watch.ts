@@ -8,7 +8,27 @@ export interface WatchableMessage {
   ts: string;
   thread_ts?: string;
   channel: string;
-  attachments?: Array<{ pretext?: string; title?: string; text?: string; fallback?: string; fields?: Array<{ title?: string; value?: string }> }>;
+  attachments?: Array<{ pretext?: string; title?: string; text?: string; fallback?: string; fields?: Array<{ title?: string; value?: string }>; blocks?: unknown[] }>;
+  blocks?: unknown[];
+}
+
+function blockTexts(blocks: unknown[] | undefined, out: string[]): void {
+  for (const block of blocks ?? []) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as Record<string, any>;
+    if (typeof b.text === "string") out.push(b.text);
+    else if (b.text && typeof b.text.text === "string") out.push(b.text.text);
+    for (const field of Array.isArray(b.fields) ? b.fields : []) if (field && typeof field.text === "string") out.push(field.text);
+    if (Array.isArray(b.elements)) {
+      const inline = b.elements.every((e: any) => e && (e.type === "text" || e.type === "link" || e.type === "emoji" || e.type === "user" || e.type === "channel"));
+      if (inline) out.push(b.elements.map((e: any) => e.text ?? e.url ?? "").join(""));
+      else blockTexts(b.elements, out);
+    }
+  }
+}
+
+function decodeEntities(text: string): string {
+  return text.replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/&amp;/g, "&");
 }
 
 const WATCHED_SUBTYPES = new Set([undefined, "bot_message", "file_share"]);
@@ -33,14 +53,24 @@ export function messageBody(event: WatchableMessage): string {
     if (text && !parts.some((p) => p.includes(text))) parts.push(text);
   };
   add(event.text);
+  const fromBlocks: string[] = [];
+  blockTexts(event.blocks, fromBlocks);
+  for (const text of fromBlocks) add(text);
   for (const a of event.attachments ?? []) {
     add(a.pretext);
     add(a.title);
     add(a.text);
     for (const f of a.fields ?? []) add([f.title, f.value].filter(Boolean).join(": "));
-    if (!a.text && !a.title) add(a.fallback);
+    const attachmentBlocks: string[] = [];
+    blockTexts(a.blocks, attachmentBlocks);
+    for (const text of attachmentBlocks) add(text);
+    if (!a.text && !a.title && attachmentBlocks.length === 0) add(a.fallback);
   }
-  return parts.join("\n").slice(0, 8000);
+  return decodeEntities(parts.join("\n")).slice(0, 8000);
+}
+
+export function shouldSkip(watch: WatchChannel, body: string): boolean {
+  return watch.skipPatterns.some((p) => new RegExp(p, "i").test(body));
 }
 
 export function dedupeKey(body: string, patterns: string[]): string {

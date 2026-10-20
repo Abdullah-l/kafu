@@ -102,6 +102,7 @@ export interface WatchChannel {
   model: string;
   dedupeMinutes: number;
   ignorePatterns: string[];
+  skipPatterns: string[];
   maxQueue: number;
 }
 
@@ -113,6 +114,7 @@ export interface SharedAccountConfig {
 const DEFAULT_DEDUPE_IGNORE = [
   "\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:?\\d{2})?",
   "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+  "<!date\\^\\d+\\^[^>]*>",
 ];
 
 function parseWatchChannels(value: unknown): WatchChannel[] {
@@ -125,6 +127,15 @@ function parseWatchChannels(value: unknown): WatchChannel[] {
     if (!/^[CG][A-Z0-9]{6,}$/.test(channel) || !prompt || out.some((w) => w.channel === channel)) continue;
     const runAs = typeof entry.runAs === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(entry.runAs.trim()) ? entry.runAs.trim() : "watcher";
     const patterns = Array.isArray(entry.ignorePatterns) ? entry.ignorePatterns.filter((p: unknown): p is string => typeof p === "string") : DEFAULT_DEDUPE_IGNORE;
+    const validPattern = (p: string) => {
+      try {
+        new RegExp(p, "gi");
+        return true;
+      } catch {
+        console.warn(`[config] Ignoring invalid watch pattern for ${channel}: ${p}`);
+        return false;
+      }
+    };
     out.push({
       channel,
       prompt,
@@ -132,15 +143,8 @@ function parseWatchChannels(value: unknown): WatchChannel[] {
       runAs,
       model: typeof entry.model === "string" ? entry.model.trim() : "",
       dedupeMinutes: Number.isFinite(entry.dedupeMinutes) && Number(entry.dedupeMinutes) >= 0 ? Number(entry.dedupeMinutes) : 30,
-      ignorePatterns: patterns.filter((p: string) => {
-        try {
-          new RegExp(p, "gi");
-          return true;
-        } catch {
-          console.warn(`[config] Ignoring invalid watch pattern for ${channel}: ${p}`);
-          return false;
-        }
-      }),
+      ignorePatterns: patterns.filter(validPattern),
+      skipPatterns: (Array.isArray(entry.skipPatterns) ? entry.skipPatterns.filter((p: unknown): p is string => typeof p === "string") : []).filter(validPattern),
       maxQueue: Number.isInteger(entry.maxQueue) && entry.maxQueue > 0 ? Number(entry.maxQueue) : 10,
     });
   }

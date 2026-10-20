@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { watchFor, messageBody, dedupeKey, WatchState } from "../slack-watch";
+import { watchFor, messageBody, dedupeKey, shouldSkip, WatchState } from "../slack-watch";
 import type { WatchChannel } from "../config";
 
 const SRC = join(import.meta.dir, "..");
@@ -21,7 +21,7 @@ const DEFAULT_IGNORE = [
 ];
 
 function watch(over: Partial<WatchChannel> = {}): WatchChannel {
-  return { channel: "C0ALERTS01", prompt: "Investigate", from: "all", runAs: "watcher", model: "", dedupeMinutes: 30, ignorePatterns: DEFAULT_IGNORE, maxQueue: 2, ...over };
+  return { channel: "C0ALERTS01", prompt: "Investigate", from: "all", runAs: "watcher", model: "", dedupeMinutes: 30, ignorePatterns: DEFAULT_IGNORE, skipPatterns: [], maxQueue: 2, ...over };
 }
 
 describe("channel watchers", () => {
@@ -40,6 +40,29 @@ describe("channel watchers", () => {
   test("reads alert text from attachments when the message has none", () => {
     const body = messageBody({ channel: "C", ts: "1", text: "", attachments: [{ title: "Success rate dropped", text: "mada 71%", fields: [{ title: "MID", value: "500000138" }] }] });
     expect(body).toBe("Success rate dropped\nmada 71%\nMID: 500000138");
+  });
+
+  test("reads alert details from Slack blocks inside attachments, and skips matching messages", () => {
+    const event = {
+      channel: "C",
+      ts: "1",
+      text: "Alert opened on api-prod (production)\n",
+      attachments: [{
+        fallback: "Alert opened on api-prod (production)\n",
+        blocks: [
+          { type: "section", fields: [{ type: "mrkdwn", text: "*High Gateway Response Time Trigger*\nmean &gt; 9999" }, { type: "mrkdwn", text: "*gateway*\ncybersource" }] },
+          { type: "context", elements: [{ type: "mrkdwn", text: "Alert opened <!date^1792476000^{time}|06:00 UTC>" }] },
+        ],
+      }],
+      blocks: [{ type: "rich_text", elements: [{ type: "rich_text_section", elements: [{ type: "text", text: "Alert opened on api-prod (production)" }] }] }],
+    };
+    const body = messageBody(event);
+    expect(body).toContain("*High Gateway Response Time Trigger*\nmean > 9999");
+    expect(body).toContain("*gateway*\ncybersource");
+    expect(body.match(/Alert opened on api-prod/g)?.length).toBe(1);
+    expect(dedupeKey(body, [...DEFAULT_IGNORE, "<!date\\^\\d+\\^[^>]*>"])).not.toContain("1792476000");
+    expect(shouldSkip(watch({ skipPatterns: ["^Alert closed on"] }), "Alert closed on api-prod")).toBe(true);
+    expect(shouldSkip(watch({ skipPatterns: ["^Alert closed on"] }), body)).toBe(false);
   });
 
   test("treats the same alert with a new time or id as a repeat, but not a different one", () => {
@@ -117,7 +140,7 @@ describe("shared Claude account", () => {
         }));
       `);
       expect(JSON.parse(out)).toEqual({
-        watches: [["C0ALERTS01", "watcher", 30, 2]],
+        watches: [["C0ALERTS01", "watcher", 30, 3]],
         publicOnly: true,
         privateAllowed: ["G0PRIVATE1"],
         before: null,

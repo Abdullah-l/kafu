@@ -15,7 +15,7 @@ import { transcribeAudioToText } from "../whisper";
 import { resolveSkillPrompt } from "../skills";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { getRunIdentity, sharedAccountEnabled, type RunIdentity } from "../users";
-import { watchFor, messageBody, WatchState } from "../slack-watch";
+import { watchFor, messageBody, shouldSkip, WatchState } from "../slack-watch";
 import type { WatchChannel } from "../config";
 import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, sharedAccountDownText, CONNECT_ACTION_PREFIX, LINK_ACTION_ID, type AccountIO } from "./slack-accounts";
 import { recordTurn, getAssistantName, setAssistantName, onConversationDeleted, threadSessionKey, type TurnStatus } from "../conversations";
@@ -196,7 +196,7 @@ function requesterDisplayName(fullName: string): string {
 
 async function postAsRequester(token: string, userId: string | undefined): Promise<string | undefined> {
   const store = postingAs.getStore();
-  if (!store || !userId || !isMultiUser()) return undefined;
+  if (!store || !userId || !isMultiUser() || sharedAccountEnabled()) return undefined;
   const name = await slackUserName(token, userId);
   if (name) store.username = requesterDisplayName(name);
   return store.username;
@@ -1332,6 +1332,10 @@ async function handleWatchedMessage(event: SlackMessage, watch: WatchChannel): P
   if (isDuplicate(event.channel, event.ts)) return;
   const body = messageBody(event);
   if (!body.trim()) return;
+  if (shouldSkip(watch, body)) {
+    console.log(`[${new Date().toLocaleTimeString()}] Watch ${event.channel}: ${event.ts} matches a skip pattern, not investigating`);
+    return;
+  }
   const earlier = watchState.duplicateOf(watch, body);
   if (earlier) {
     const link = (await slackGet<{ permalink?: string }>(config.botToken, "chat.getPermalink", { channel: event.channel, message_ts: earlier }).catch(() => ({ permalink: "" }))).permalink;
