@@ -71,6 +71,7 @@ function resolveClaudeExecutable(): string {
 export const CLAUDE_EXECUTABLE = resolveClaudeExecutable();
 
 const COMPACT_WARN_THRESHOLD = 25;
+const ANSWER_GRACE_MS = 1500;
 const COMPACT_TIMEOUT_ENABLED = true;
 
 function cleanSpawnEnv(): Record<string, string> {
@@ -538,6 +539,8 @@ export async function runClaudeStream(
   let sessionId: string | undefined;
   let resultText = "";
   let stderr = "";
+  let answered = false;
+  let stoppedAfterAnswer = false;
 
   let streamDelivered = "";
   let streamLastMsgId = "";
@@ -562,8 +565,17 @@ export async function runClaudeStream(
           if ((event.type === "system" || event.type === "result") && typeof event.session_id === "string") {
             sessionId = event.session_id;
           }
-          if (event.type === "result" && typeof event.result === "string") {
+          if (event.type === "result" && typeof event.result === "string" && !answered) {
             resultText = event.result;
+            if (event.subtype === "success" && event.is_error !== true) {
+              answered = true;
+              setTimeout(() => {
+                if (proc.exitCode !== null) return;
+                stoppedAfterAnswer = true;
+                try { proc.kill("SIGTERM"); } catch {}
+                setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 3000);
+              }, ANSWER_GRACE_MS);
+            }
           }
           if (cancelKey && event.type === "result" && event.modelUsage && typeof event.modelUsage === "object") {
             const usage = Object.values(event.modelUsage as Record<string, { contextWindow?: number }>).find((u) => typeof u?.contextWindow === "number");
@@ -636,7 +648,8 @@ export async function runClaudeStream(
     await proc.exited;
     mainActiveProcs.delete(proc);
     if (cancelKey) unregisterCancelProc(cancelKey, proc);
-    return { rawStdout: resultText, stderr: stderr.trim(), exitCode: proc.exitCode ?? 1, sessionId };
+    if (stoppedAfterAnswer) console.log(`[${new Date().toLocaleTimeString()}] Run answered; stopped leftover background work`);
+    return { rawStdout: resultText, stderr: stderr.trim(), exitCode: stoppedAfterAnswer ? 0 : proc.exitCode ?? 1, sessionId };
   } catch (err) {
     if (streamJsonTimeoutId) clearTimeout(streamJsonTimeoutId);
     mainActiveProcs.delete(proc);
