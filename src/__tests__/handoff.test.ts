@@ -15,6 +15,17 @@ describe("bot handoff tokens", () => {
     expect(readHandoff(text, "C0ALERTS01", "100.1")).toBeNull();
   });
 
+  test("reads the token from a hidden block id, keeping the message text clean", async () => {
+    const { createHandoffToken, readHandoff, handoffBlocks } = await import("../handoff");
+    const text = "<@UALEM> <@U0ALICE01> asked you to take this over.";
+    const token = createHandoffToken("U0ALICE01", "C0ALERTS01", "300.3");
+    const blocks = handoffBlocks(text, token) as Array<{ block_id?: string }>;
+    expect(token.length).toBeLessThanOrEqual(255);
+    expect(readHandoff(text, "C0ALERTS01", "300.3", Date.now(), blocks)).toEqual({ requester: "U0ALICE01", text });
+    expect(readHandoff(text, "C0ALERTS01", "300.3", Date.now(), blocks)).toBeNull();
+    expect(readHandoff(text, "C0ALERTS01", "300.3", Date.now(), [{ block_id: "kh1.forged.token" }])).toBeNull();
+  });
+
   test("rejects forged, tampered and expired tokens", async () => {
     const { createHandoffToken, readHandoff } = await import("../handoff");
     expect(readHandoff("[handoff:kh1.eyJyIjoiVTEifQ.abc]", "C1", "1.1")).toBeNull();

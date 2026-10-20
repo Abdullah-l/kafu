@@ -16,7 +16,7 @@ import { resolveSkillPrompt } from "../skills";
 import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wizard";
 import { getRunIdentity, sharedAccountEnabled, type RunIdentity } from "../users";
 import { watchFor, messageBody, shouldSkip, WatchState } from "../slack-watch";
-import { HANDOFF_ACTION_ID, handoffAvailable, createHandoffToken, readHandoff } from "../handoff";
+import { HANDOFF_ACTION_ID, handoffAvailable, createHandoffToken, readHandoff, handoffBlocks } from "../handoff";
 import type { WatchChannel } from "../config";
 import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, sharedAccountDownText, CONNECT_ACTION_PREFIX, LINK_ACTION_ID, type AccountIO } from "./slack-accounts";
 import { recordTurn, getAssistantName, setAssistantName, onConversationDeleted, threadSessionKey, type TurnStatus } from "../conversations";
@@ -1374,7 +1374,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
   const botIdAllowed = allowBotIds.length === 0 || (!!event.bot_id && allowBotIds.includes(event.bot_id));
   const isBotAllowed = !watched && channelAllowed && botIdAllowed;
   const handoff = !watched && event.bot_id && event.thread_ts && config.acceptHandoffsFrom.includes(event.bot_id)
-    ? readHandoff(event.text, event.channel, event.thread_ts)
+    ? readHandoff(event.text, event.channel, event.thread_ts, Date.now(), (event.blocks ?? []) as Array<{ block_id?: string }>)
     : null;
 
   if (!watched) {
@@ -2054,7 +2054,8 @@ async function handleBlockAction(payload: any): Promise<void> {
     const threadTs = message?.thread_ts ?? message?.ts;
     if (!threadTs || !handoffAvailable()) return;
     const { target, message: note } = config.handoff;
-    await postMessage(config.botToken, channelId, `<@${target}> <@${user.id}> ${note} [handoff:${createHandoffToken(user.id, channelId, threadTs)}]`, threadTs);
+    const handoffText = `<@${target}> <@${user.id}> ${note}`;
+    await postBlocks(config.botToken, channelId, handoffText, handoffBlocks(handoffText, createHandoffToken(user.id, channelId, threadTs)), threadTs);
     if (message?.ts) {
       const kept = ((message as { blocks?: Record<string, unknown>[] }).blocks ?? []).filter((b) => b.type !== "actions");
       await slackApi(config.botToken, "chat.update", {

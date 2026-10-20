@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const HANDOFF_ACTION_ID = "kafu_handoff";
 const TOKEN_RE = /\s*\[handoff:(kh1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\]/;
+const BARE_TOKEN_RE = /^kh1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const TTL_MS = 10 * 60_000;
 const used = new Map<string, number>();
 
@@ -34,11 +35,22 @@ export function createHandoffToken(requester: string, channel: string, threadTs:
   return `kh1.${body}.${sign(body, key)}`;
 }
 
-export function readHandoff(text: string, channel: string, threadTs: string, now = Date.now()): { requester: string; text: string } | null {
+export function handoffBlocks(text: string, token: string): Record<string, unknown>[] {
+  return [{ type: "section", block_id: token, text: { type: "mrkdwn", text } }];
+}
+
+export function readHandoff(
+  text: string,
+  channel: string,
+  threadTs: string,
+  now = Date.now(),
+  blocks: Array<{ block_id?: string }> = [],
+): { requester: string; text: string } | null {
   const key = secret();
-  const match = String(text ?? "").match(TOKEN_RE);
-  if (!key || !match) return null;
-  const [, body, mac] = match[1].split(".");
+  const fromBlocks = blocks.map((b) => b?.block_id ?? "").find((id) => BARE_TOKEN_RE.test(id));
+  const token = fromBlocks ?? String(text ?? "").match(TOKEN_RE)?.[1];
+  if (!key || !token) return null;
+  const [, body, mac] = token.split(".");
   const expected = Buffer.from(sign(body, key));
   const given = Buffer.from(mac);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
