@@ -79,7 +79,7 @@ describe("shared Claude account", () => {
     const dir = mkdtempSync(join(tmpdir(), "kafu-shared-"));
     try {
       await Bun.write(join(dir, ".claude/kafu/settings.json"), JSON.stringify({
-        slack: { publicChannelsOnly: true, watchChannels: [{ channel: "C0ALERTS01", prompt: "Investigate" }, { channel: "nope", prompt: "x" }] },
+        slack: { publicChannelsOnly: true, allowedPrivateChannels: ["G0PRIVATE1", "bad"], watchChannels: [{ channel: "C0ALERTS01", prompt: "Investigate" }, { channel: "nope", prompt: "x" }] },
         multiUser: { enabled: true, sharedAccount: { enabled: true, admins: ["UADMIN1"] } },
       }));
       const out = await runInDir(dir, `
@@ -102,6 +102,7 @@ describe("shared Claude account", () => {
         console.log(JSON.stringify({
           watches: settings.slack.watchChannels.map((w) => [w.channel, w.runAs, w.dedupeMinutes, w.ignorePatterns.length]),
           publicOnly: settings.slack.publicChannelsOnly,
+          privateAllowed: settings.slack.allowedPrivateChannels,
           before,
           anyoneToken: anyone.token,
           anyoneOwnDir: anyone.configDir.includes("/users/UANYONE/"),
@@ -118,6 +119,7 @@ describe("shared Claude account", () => {
       expect(JSON.parse(out)).toEqual({
         watches: [["C0ALERTS01", "watcher", 30, 2]],
         publicOnly: true,
+        privateAllowed: ["G0PRIVATE1"],
         before: null,
         anyoneToken: "sk-ant-oat01-shared-token",
         anyoneOwnDir: true,

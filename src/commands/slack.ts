@@ -1387,7 +1387,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
   const channelId = event.channel;
   const isDirectMessage = isDM(event);
 
-  if (!watched && config.publicChannelsOnly && !config.watchChannels.some((w) => w.channel === channelId) && !(await isPublicChannel(config.botToken, event))) {
+  if (!watched && config.publicChannelsOnly && !config.watchChannels.some((w) => w.channel === channelId) && !config.allowedPrivateChannels.includes(channelId) && !(await isPublicChannel(config.botToken, event))) {
     const asked = isDirectMessage || isBotMentioned(event.text);
     if (asked && event.user && noticeDue(publicOnlyNotices, `${channelId}:${event.user}`)) {
       await sendMessage(config.botToken, channelId, "I only work in public channels. Mention me in one and I'll help there.", isDirectMessage ? undefined : event.thread_ts ?? event.ts);
@@ -2477,7 +2477,7 @@ export function startSlack(debug = false): void {
 
   console.log("Slack bot started (Socket Mode)");
   console.log(`  Allowed users: ${config.allowedUserIds.length === 0 || config.allowedUserIds.includes("*") ? "all" : config.allowedUserIds.join(", ")}`);
-  if (config.publicChannelsOnly) console.log("  Channels: public only");
+  if (config.publicChannelsOnly) console.log(`  Channels: public only${config.allowedPrivateChannels.length ? `, plus ${config.allowedPrivateChannels.join(", ")}` : ""}`);
   if (config.watchChannels.length) console.log(`  Watching: ${config.watchChannels.map((w) => w.channel).join(", ")}`);
   if (sharedAccountEnabled()) console.log(`  Claude account: shared (admins: ${getSettings().multiUser.sharedAccount.admins.join(", ") || "none"})`);
   if (isMultiUser() && !sharedAccountEnabled()) console.log("  Multi-user: each person signs in with their own Claude account");

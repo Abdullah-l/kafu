@@ -174,7 +174,7 @@ async function resolveChannel(ref: string, requester: string, forWrite: boolean)
     channel = hit;
   }
   const slackConfig = getSettings().slack;
-  if (slackConfig.publicChannelsOnly && (channel.is_im || channel.is_private || channel.is_mpim) && !slackConfig.watchChannels.some((w) => w.channel === channel.id)) {
+  if (slackConfig.publicChannelsOnly && (channel.is_im || channel.is_private || channel.is_mpim) && !slackConfig.watchChannels.some((w) => w.channel === channel.id) && !slackConfig.allowedPrivateChannels.includes(channel.id)) {
     throw new Error("I only work with public channels");
   }
   if (channel.is_im) {

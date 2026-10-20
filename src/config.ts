@@ -60,7 +60,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezone: "UTC",
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
-  slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, watchChannels: [] },
+  slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, allowedPrivateChannels: [], watchChannels: [] },
   multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], tempFileTtlDays: 14, sharedCache: null, sharedAccount: { enabled: false, admins: [] }, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
@@ -90,6 +90,7 @@ export interface SlackConfig {
   allowBotIds: string[];
   assistantStatus: boolean;
   publicChannelsOnly: boolean;
+  allowedPrivateChannels: string[];
   watchChannels: WatchChannel[];
 }
 
@@ -381,6 +382,7 @@ function parseSettings(raw: Record<string, any>): Settings {
       allowBotIds: Array.isArray(raw.slack?.allowBotIds) ? raw.slack.allowBotIds.map(String) : [],
       assistantStatus: raw.slack?.assistantStatus === true,
       publicChannelsOnly: raw.slack?.publicChannelsOnly === true,
+      allowedPrivateChannels: Array.isArray(raw.slack?.allowedPrivateChannels) ? raw.slack.allowedPrivateChannels.filter((c: unknown): c is string => typeof c === "string" && /^[CG][A-Z0-9]{6,}$/.test(c)) : [],
       watchChannels: parseWatchChannels(raw.slack?.watchChannels),
     },
     multiUser: {
