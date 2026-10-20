@@ -1340,7 +1340,7 @@ async function handleWatchedMessage(event: SlackMessage, watch: WatchChannel): P
   const earlier = watchState.duplicateOf(watch, body);
   if (earlier) {
     const link = (await slackGet<{ permalink?: string }>(config.botToken, "chat.getPermalink", { channel: event.channel, message_ts: earlier }).catch(() => ({ permalink: "" }))).permalink;
-    await sendMessage(config.botToken, event.channel, `Same as ${link ? `<${link}|this earlier alert>` : "an earlier alert"}, which I'm already looking at or have looked at. See that thread.`, event.ts);
+    await sendMessage(config.botToken, event.channel, `Repeat of ${link ? `<${link}|this alert>` : "an earlier alert"}. See that thread.`, event.ts);
     console.log(`[${new Date().toLocaleTimeString()}] Watch ${event.channel}: ${event.ts} repeats ${earlier}, linked instead of investigating`);
     return;
   }
