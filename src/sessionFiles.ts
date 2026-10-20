@@ -8,8 +8,12 @@ export function sanitizeProjectSlug(cwd: string): string {
   return cwd.replace(/[/\\.]/g, "-");
 }
 
+function homeDir(): string {
+  return process.env.HOME || homedir();
+}
+
 export function getClaudeProjectDir(cwd: string = process.cwd()): string {
-  return join(homedir(), ".claude", "projects", sanitizeProjectSlug(cwd));
+  return join(homeDir(), ".claude", "projects", sanitizeProjectSlug(cwd));
 }
 
 export function findSessionJsonlPath(sessionId: string, cwd: string = process.cwd()): string | null {
@@ -18,7 +22,7 @@ export function findSessionJsonlPath(sessionId: string, cwd: string = process.cw
   const direct = join(getClaudeProjectDir(cwd), `${sessionId}.jsonl`);
   if (existsSync(direct)) return direct;
 
-  const projectsRoot = join(homedir(), ".claude", "projects");
+  const projectsRoot = join(homeDir(), ".claude", "projects");
   if (!existsSync(projectsRoot)) return null;
 
   let newest: { path: string; mtimeMs: number } | null = null;
