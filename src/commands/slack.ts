@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { watchRunMeta, type RunMeta } from "../runner";
 import { TaskStream } from "../slack-stream";
-import { rememberActionToken } from "../slack-tools";
+import { rememberActionToken, startRunThread, finishRunThread, hasDeferredFiles } from "../slack-tools";
 import { audit } from "../audit";
 import { PR_ACTION_PREFIX, handlePrCardAction } from "../pr-cards";
 import { ASK_ACTION_PREFIX, answerFromButton } from "../questions";
@@ -18,6 +18,7 @@ import { getRunIdentity, sharedAccountEnabled, type RunIdentity } from "../users
 import { watchFor, messageBody, shouldSkip, WatchState } from "../slack-watch";
 import { HANDOFF_ACTION_ID, handoffAvailable, createHandoffToken, readHandoff, handoffBlocks } from "../handoff";
 import { answerBlocks, MESSAGE_TEXT_MAX } from "../slack-format";
+import { escalationCandidate, confirmEscalation } from "../escalation";
 import type { WatchChannel } from "../config";
 import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, sharedAccountDownText, CONNECT_ACTION_PREFIX, LINK_ACTION_ID, type AccountIO } from "./slack-accounts";
 import { recordTurn, getAssistantName, setAssistantName, onConversationDeleted, threadSessionKey, type TurnStatus } from "../conversations";
@@ -419,7 +420,7 @@ async function postBlocks(
   blocks: Record<string, unknown>[],
   threadTs?: string,
 ): Promise<string | null> {
-  const params: Record<string, unknown> = { channel: channelId, text, blocks };
+  const params: Record<string, unknown> = { channel: channelId, text, blocks, unfurl_links: false, unfurl_media: false };
   if (threadTs) params.thread_ts = threadTs;
   const data = await slackApi<{ ts: string }>(token, "chat.postMessage", params).catch((err) => {
     debugLog(`postBlocks failed: ${err instanceof Error ? err.message : err}`);
@@ -482,6 +483,8 @@ async function postMessage(
   const params: Record<string, unknown> = {
     channel: channelId,
     text,
+    unfurl_links: false,
+    unfurl_media: false,
   };
   if (threadTs) params.thread_ts = threadTs;
   const data = await slackApi<{ ts: string }>(token, "chat.postMessage", params).catch((err) => {
@@ -1649,6 +1652,13 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
     const slackDirectives = await loadSlackDirectives();
     const channelType = isDirectMessage ? "DM" : inThread ? "thread" : "channel";
     const promptParts = [`[Slack ${watched ? "channel watch" : `from ${userId ? await slackUserLabel(config.botToken, userId) : label}`} in ${channelType} ${channelId}${inThread ? ` thread ${event.thread_ts}` : ""}]`];
+    const escalationWatch = config.watchChannels.find((w) => w.channel === channelId && w.escalateTo.length > 0);
+    const escalation = escalationWatch ? await escalationCandidate(config.botToken, channelId, replyThreadTs, escalationWatch.escalateTo).catch(() => null) : null;
+    if (escalation) {
+      promptParts.push(escalation.assigned
+        ? `This thread's engineer is <@${escalation.user}>. If something here needs a person, mention them, and nobody else.`
+        : `If you can't fully handle this yourself (it needs an action, a change, access or a decision you can't make), mention <@${escalation.user}> once in your reply and nobody else. Don't mention anyone if you handled it.`);
+    }
     const threadLink = await cachedThreadLink(config.botToken, channelId, isDirectMessage && !inThread ? event.ts : replyThreadTs);
     if (threadLink.permalink) {
       promptParts.push(`Slack thread link: ${threadLink.permalink}${threadLink.channelName ? ` (${threadLink.channelName})` : ""}.`);
@@ -1762,6 +1772,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       ? (() => { try { return agentDirKey(actingUserId ? `slack-${channelId}-${actingUserId}` : `slack-${channelId}`, agentDirThread); } catch { return undefined; } })()
       : undefined;
 
+    if (actingUserId) startRunThread(channelId, replyThreadTs, actingUserId);
     let result;
     try {
       result = await runForUser({
@@ -1837,6 +1848,9 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
 
       const reuseProgress = !!progressTs && !!finalText && !buttons && !select && finalText.length <= MESSAGE_TEXT_MAX && !!answerBlocks(finalText, [{ type: "context", elements: [] }, { type: "actions", elements: [] }]);
       recordedReply = finalText || editContent || "";
+      if (escalation && escalationWatch && !escalation.assigned && finalText) {
+        await confirmEscalation(config.botToken, channelId, replyThreadTs, escalationWatch.escalateTo, escalation.user, finalText).catch(() => false);
+      }
       let doneFooter = "";
       if (pendingStream) {
         const doneTitle = `Done${pendingStream.steps ? ` — ${pendingStream.steps} step${pendingStream.steps === 1 ? "" : "s"}` : ""}`;
@@ -1954,7 +1968,15 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
         doneFooter = `✓ Done${steps ? ` — ${steps} step${steps === 1 ? "" : "s"}` : ""}   ${runStatusLine(runMeta, Date.now() - startedAt)}`;
       }
       const footerBlocks: Record<string, unknown>[] = doneFooter ? [{ type: "context", elements: [{ type: "mrkdwn", text: doneFooter }] }] : [];
-      if (reuseProgress && progressTs) {
+      const filesCarryAnswer = !!actingUserId && hasDeferredFiles(channelId, replyThreadTs, actingUserId)
+        && !!finalText && !buttons && !select && !handoffBlocks.length && finalText.length <= 3500;
+      if (filesCarryAnswer) {
+        if (progressTs) await deleteMessage(config.botToken, channelId, progressTs);
+        await finishRunThread(channelId, replyThreadTs, actingUserId!, finalText).catch(async (err) => {
+          debugLog(`answer with files failed: ${err instanceof Error ? err.message : err}`);
+          await postMessage(config.botToken, channelId, finalText, replyThreadTs);
+        });
+      } else if (reuseProgress && progressTs) {
         await slackApi(config.botToken, "chat.update", {
           channel: channelId,
           ts: progressTs,
@@ -1997,6 +2019,12 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
 
       await removeReaction(config.botToken, channelId, event.ts, "hourglass_flowing_sand");
       await clearAssistantStatus(config.botToken, channelId, replyThreadTs);
+    }
+
+    if (actingUserId) {
+      await finishRunThread(channelId, replyThreadTs, actingUserId).catch((err) => {
+        console.error(`[Slack] Failed to attach files for ${actingUserId}: ${err instanceof Error ? err.message : err}`);
+      });
     }
 
     if (actingUserId) {

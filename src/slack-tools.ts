@@ -51,6 +51,32 @@ export function rememberActionToken(userId: string, token: string): void {
 }
 const posted = new Map<string, string>();
 
+const runThreads = new Set<string>();
+const deferredFiles = new Map<string, Array<{ id: string; title: string }>>();
+
+export function startRunThread(channel: string, threadTs: string, requester: string): void {
+  runThreads.add(`${channel}:${threadTs}:${requester}`);
+}
+
+export async function finishRunThread(channel: string, threadTs: string, requester: string, comment?: string): Promise<boolean> {
+  const key = `${channel}:${threadTs}:${requester}`;
+  runThreads.delete(key);
+  const files = deferredFiles.get(key);
+  deferredFiles.delete(key);
+  if (!files?.length) return false;
+  await slackPost("files.completeUploadExternal", {
+    files,
+    channel_id: channel,
+    thread_ts: threadTs,
+    ...(comment ? { initial_comment: comment } : {}),
+  });
+  return true;
+}
+
+export function hasDeferredFiles(channel: string, threadTs: string, requester: string): boolean {
+  return (deferredFiles.get(`${channel}:${threadTs}:${requester}`)?.length ?? 0) > 0;
+}
+
 export async function postingName(requester: string): Promise<string | undefined> {
   const { sharedAccountEnabled } = await import("./users");
   if (sharedAccountEnabled()) return undefined;
@@ -367,6 +393,14 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
       const target = await slackGet<{ upload_url: string; file_id: string }>("files.getUploadURLExternal", { filename, length: data.length });
       const put = await fetchWithTimeout(target.upload_url, { method: "POST", body: data }, 120_000);
       if (!put.ok) throw new Error(`upload failed: HTTP ${put.status}`);
+      const runKey = `${channel.id}:${String(args.thread_ts ?? "")}:${requester}`;
+      if (args.thread_ts && runThreads.has(runKey)) {
+        const queued = deferredFiles.get(runKey) ?? [];
+        queued.push({ id: target.file_id, title: String(args.title ?? filename) });
+        deferredFiles.set(runKey, queued);
+        console.log(`[${new Date().toLocaleTimeString()}] Slack tools: ${requester} attached ${filename} to their reply in ${channel.id}`);
+        return { file_id: target.file_id, attached_to_reply: true, note: "This file will be attached to your reply in this thread when it posts. Don't link it or list what's in it again in your reply." };
+      }
       await slackPost("files.completeUploadExternal", {
         files: [{ id: target.file_id, title: String(args.title ?? filename) }],
         channel_id: channel.id,
