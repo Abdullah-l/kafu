@@ -17,6 +17,7 @@ import { isWizardTrigger, hasActiveWizard, handleWizardInput } from "./plugin-wi
 import { getRunIdentity, sharedAccountEnabled, type RunIdentity } from "../users";
 import { watchFor, messageBody, shouldSkip, WatchState } from "../slack-watch";
 import { HANDOFF_ACTION_ID, handoffAvailable, createHandoffToken, readHandoff, handoffBlocks } from "../handoff";
+import { answerBlocks, MESSAGE_TEXT_MAX } from "../slack-format";
 import type { WatchChannel } from "../config";
 import { handleAccountMessage, sendLoginLink, sendPortalLink, isAuthFailure, sharedAccountDownText, CONNECT_ACTION_PREFIX, LINK_ACTION_ID, type AccountIO } from "./slack-accounts";
 import { recordTurn, getAssistantName, setAssistantName, onConversationDeleted, threadSessionKey, type TurnStatus } from "../conversations";
@@ -299,7 +300,7 @@ async function sendMessage(
   const normalized = text.replace(/\[react:[^\]\r\n]+\]/gi, "").trim();
   if (!normalized) return;
 
-  const MAX_LEN = 3800;
+  const MAX_LEN = MESSAGE_TEXT_MAX;
   for (let i = 0; i < normalized.length; i += MAX_LEN) {
     const chunk = normalized.slice(i, i + MAX_LEN);
     const params: Record<string, unknown> = {
@@ -1834,7 +1835,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       const { cleanedText: blockText, buttons, select } = extractBlockKitDirectives(afterChannelRead);
       const finalText = await toSlackReply(config.botToken, blockText);
 
-      const reuseProgress = !!progressTs && !!finalText && !buttons && !select && finalText.length <= 3800;
+      const reuseProgress = !!progressTs && !!finalText && !buttons && !select && finalText.length <= MESSAGE_TEXT_MAX && !!answerBlocks(finalText, [{ type: "context", elements: [] }, { type: "actions", elements: [] }]);
       recordedReply = finalText || editContent || "";
       let doneFooter = "";
       if (pendingStream) {
@@ -1945,15 +1946,20 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
         }
       }
 
-      const handoffBlocks: Record<string, unknown>[] = watched && config.handoff && handoffAvailable() && finalText && finalText.length <= 2900
+      const handoffBlocks: Record<string, unknown>[] = watched && config.handoff && handoffAvailable() && finalText
         ? [{ type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: config.handoff.label }, action_id: HANDOFF_ACTION_ID, value: "handoff" }] }]
         : [];
+      if (progressTs && !doneFooter) {
+        const steps = activity.filter((l) => l.startsWith("●")).length;
+        doneFooter = `✓ Done${steps ? ` — ${steps} step${steps === 1 ? "" : "s"}` : ""}   ${runStatusLine(runMeta, Date.now() - startedAt)}`;
+      }
+      const footerBlocks: Record<string, unknown>[] = doneFooter ? [{ type: "context", elements: [{ type: "mrkdwn", text: doneFooter }] }] : [];
       if (reuseProgress && progressTs) {
         await slackApi(config.botToken, "chat.update", {
           channel: channelId,
           ts: progressTs,
           text: finalText,
-          blocks: handoffBlocks.length ? [{ type: "section", text: { type: "mrkdwn", text: finalText } }, ...handoffBlocks] : [],
+          blocks: answerBlocks(finalText, [...footerBlocks, ...handoffBlocks]) ?? [],
         }).catch((err) => {
           debugLog(`answer-in-progress update failed: ${err instanceof Error ? err.message : err}`);
         });
@@ -1961,10 +1967,10 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       } else {
         if (progressTs) {
           const steps = activity.filter((l) => l.startsWith("●")).length;
-          if (finalText || steps > 0) {
-            await collapseProgress(config.botToken, channelId, progressTs, `✓ Done${steps ? ` — ${steps} step${steps === 1 ? "" : "s"}` : ""}`, runStatusLine(runMeta, Date.now() - startedAt));
-          } else {
+          if (finalText || steps === 0) {
             await deleteMessage(config.botToken, channelId, progressTs);
+          } else {
+            await collapseProgress(config.botToken, channelId, progressTs, `✓ Done — ${steps} step${steps === 1 ? "" : "s"}`, runStatusLine(runMeta, Date.now() - startedAt));
           }
         }
         if (finalText) {
@@ -1972,16 +1978,14 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
           if (buttons || select) {
             sentTs = await sendBlockKitMessage(config.botToken, channelId, finalText, buttons, select, replyThreadTs);
           } else {
-            const MAX_LEN = 3800;
-            for (let i = 0; i < finalText.length; i += MAX_LEN) {
-              const chunk = finalText.slice(i, i + MAX_LEN);
-              const last = i + MAX_LEN >= finalText.length;
-              const footerBlocks = last && doneFooter ? [{ type: "context", elements: [{ type: "mrkdwn", text: doneFooter }] }] : [];
-              const extraBlocks = last ? [...footerBlocks, ...handoffBlocks] : [];
-              const chunkTs = extraBlocks.length && chunk.length <= 2900
-                ? await postBlocks(config.botToken, channelId, chunk, [{ type: "section", text: { type: "mrkdwn", text: chunk } }, ...extraBlocks], replyThreadTs)
-                : await postMessage(config.botToken, channelId, chunk, replyThreadTs);
-              if (chunkTs) sentTs = chunkTs;
+            const blocks = finalText.length <= MESSAGE_TEXT_MAX ? answerBlocks(finalText, [...footerBlocks, ...handoffBlocks]) : null;
+            if (blocks) {
+              sentTs = await postBlocks(config.botToken, channelId, finalText, blocks, replyThreadTs);
+            } else {
+              for (let i = 0; i < finalText.length; i += MESSAGE_TEXT_MAX) {
+                const chunkTs = await postMessage(config.botToken, channelId, finalText.slice(i, i + MESSAGE_TEXT_MAX), replyThreadTs);
+                if (chunkTs) sentTs = chunkTs;
+              }
             }
           }
           if (sentTs) lastBotMessageTs.set(msgKey, sentTs);
