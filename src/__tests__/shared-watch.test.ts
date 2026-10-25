@@ -102,7 +102,7 @@ describe("shared Claude account", () => {
     const dir = mkdtempSync(join(tmpdir(), "kafu-shared-"));
     try {
       await Bun.write(join(dir, ".claude/kafu/settings.json"), JSON.stringify({
-        slack: { publicChannelsOnly: true, allowedPrivateChannels: ["G0PRIVATE1", "bad"], watchChannels: [{ channel: "C0ALERTS01", prompt: "Investigate" }, { channel: "nope", prompt: "x" }] },
+        slack: { publicChannelsOnly: true, allowedPrivateChannels: ["G0PRIVATE1", "bad"], watchChannels: [{ channel: "C0ALERTS01", prompt: "Investigate" }, { channel: "C0SUPPORT1", prompt: "Help", handoff: false }, { channel: "nope", prompt: "x" }] },
         multiUser: { enabled: true, sharedAccount: { enabled: true, admins: ["UADMIN1"] } },
       }));
       const out = await runInDir(dir, `
@@ -123,7 +123,7 @@ describe("shared Claude account", () => {
         try { await a.logoutClaude("UANYONE"); } catch (e) { memberLogout = e.message; }
         const sharedModel = (await u.getUser("shared")).model;
         console.log(JSON.stringify({
-          watches: settings.slack.watchChannels.map((w) => [w.channel, w.runAs, w.dedupeMinutes, w.ignorePatterns.length]),
+          watches: settings.slack.watchChannels.map((w) => [w.channel, w.runAs, w.dedupeMinutes, w.ignorePatterns.length, w.handoff]),
           publicOnly: settings.slack.publicChannelsOnly,
           privateAllowed: settings.slack.allowedPrivateChannels,
           before,
@@ -140,7 +140,7 @@ describe("shared Claude account", () => {
         }));
       `);
       expect(JSON.parse(out)).toEqual({
-        watches: [["C0ALERTS01", "watcher", 30, 3]],
+        watches: [["C0ALERTS01", "watcher", 30, 3, true], ["C0SUPPORT1", "watcher", 30, 3, false]],
         publicOnly: true,
         privateAllowed: ["G0PRIVATE1"],
         before: null,

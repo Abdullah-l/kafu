@@ -333,6 +333,9 @@ export const TOOLS: Record<string, { description: string; schema: Record<string,
       const text = String(args.text ?? "").trim();
       if (!text) throw new Error("text is required");
       const channel = await resolveChannel(args.channel, requester, true);
+      if (args.thread_ts && runThreads.has(`${channel.id}:${String(args.thread_ts)}:${requester}`)) {
+        throw new Error("You're already answering this thread, and your reply posts here when you finish. Put this in your answer instead of posting it.");
+      }
       checkWriteBudget(requester);
       const username = await postingName(requester);
       const sent = await slackPost<{ channel: string; ts: string }>("chat.postMessage", {

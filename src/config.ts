@@ -113,6 +113,7 @@ export interface WatchChannel {
   skipPatterns: string[];
   maxQueue: number;
   escalateTo: string[];
+  handoff: boolean;
 }
 
 export interface SharedAccountConfig {
@@ -156,6 +157,7 @@ function parseWatchChannels(value: unknown): WatchChannel[] {
       skipPatterns: (Array.isArray(entry.skipPatterns) ? entry.skipPatterns.filter((p: unknown): p is string => typeof p === "string") : []).filter(validPattern),
       maxQueue: Number.isInteger(entry.maxQueue) && entry.maxQueue > 0 ? Number(entry.maxQueue) : 10,
       escalateTo: Array.isArray(entry.escalateTo) ? entry.escalateTo.filter((e: unknown): e is string => typeof e === "string" && /^[UWS][A-Z0-9]+$/.test(e)) : [],
+      handoff: entry.handoff !== false,
     });
   }
   return out;

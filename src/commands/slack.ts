@@ -1960,7 +1960,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
         }
       }
 
-      const handoffBlocks: Record<string, unknown>[] = watched && config.handoff && handoffAvailable() && finalText
+      const handoffBlocks: Record<string, unknown>[] = watched?.watch.handoff && config.handoff && handoffAvailable() && finalText
         ? [{ type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: config.handoff.label }, action_id: HANDOFF_ACTION_ID, value: "handoff" }] }]
         : [];
       if (progressTs && !doneFooter) {

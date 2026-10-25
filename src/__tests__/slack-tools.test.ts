@@ -60,6 +60,10 @@ describe("slack tools", () => {
       const privOutsider = await t.runTool("slack_read_messages", { channel: "#secret" }, "U0BOBBY001");
       const othersDm = await t.runTool("slack_read_messages", { channel: "D0BOBBY001" }, "U0ABDULLAH");
       const postPublic = await t.runTool("slack_post_message", { channel: "#team", text: "PR ready <@U0BOBBY001>" }, "U0ABDULLAH");
+      t.startRunThread("C0PUB00001", "5.5", "U0ABDULLAH");
+      const postOwnThread = await t.runTool("slack_post_message", { channel: "#team", thread_ts: "5.5", text: "answer" }, "U0ABDULLAH");
+      const postOtherThread = await t.runTool("slack_post_message", { channel: "#team", thread_ts: "6.6", text: "fyi" }, "U0ABDULLAH");
+      await t.finishRunThread("C0PUB00001", "5.5", "U0ABDULLAH");
       const postPrivOutsider = await t.runTool("slack_post_message", { channel: "G0PRIV0001", text: "x" }, "U0BOBBY001");
       const dm = await t.runTool("slack_post_message", { channel: "<@U0BOBBY001>", text: "hey" }, "U0ABDULLAH");
       const editOthers = await t.runTool("slack_update_message", { channel: "C0PUB00001", ts: "9.9", text: "y" }, "U0BOBBY001");
@@ -84,6 +88,8 @@ describe("slack tools", () => {
         privOutsider: privOutsider.ok,
         othersDm: othersDm.ok,
         postPublic: postPublic.result,
+        postOwnThread: postOwnThread.ok,
+        postOtherThread: postOtherThread.ok,
         postPrivOutsider: postPrivOutsider.ok,
         dm: dm.result.channel,
         editOthers: editOthers.ok,
@@ -103,6 +109,8 @@ describe("slack tools", () => {
       privOutsider: false,
       othersDm: false,
       postPublic: { channel: "C0PUB00001", ts: "9.9", permalink: "https://x.slack.com/archives/C0PUB00001/p99" },
+      postOwnThread: false,
+      postOtherThread: true,
       postPrivOutsider: false,
       dm: "D0BOBBY001",
       editOthers: false,
