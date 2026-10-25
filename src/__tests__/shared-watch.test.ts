@@ -21,7 +21,7 @@ const DEFAULT_IGNORE = [
 ];
 
 function watch(over: Partial<WatchChannel> = {}): WatchChannel {
-  return { channel: "C0ALERTS01", prompt: "Investigate", from: "all", runAs: "watcher", model: "", dedupeMinutes: 30, ignorePatterns: DEFAULT_IGNORE, skipPatterns: [], maxQueue: 2, ...over };
+  return { channel: "C0ALERTS01", prompt: "Investigate", from: "all", runAs: "watcher", model: "", dedupeMinutes: 30, ignorePatterns: DEFAULT_IGNORE, skipPatterns: [], maxQueue: 2, escalateTo: [], handoff: true, ...over };
 }
 
 describe("channel watchers", () => {
