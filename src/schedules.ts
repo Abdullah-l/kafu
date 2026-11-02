@@ -197,15 +197,19 @@ export async function runSchedule(schedule: Schedule): Promise<string> {
     }
     const footer = `Scheduled by <@${schedule.owner}>: ${schedule.name}`;
     const username = await (await import("./slack-tools")).postingName(schedule.owner).catch(() => undefined);
-    for (let i = 0; i < text.length; i += 3800) {
-      const chunk = text.slice(i, i + 3800);
-      const last = i + 3800 >= text.length;
+    const { messageSections } = await import("./slack-format");
+    const messages = messageSections(text);
+    for (const [i, sections] of messages.entries()) {
+      const last = i === messages.length - 1;
       await slack("chat.postMessage", {
         channel: schedule.channel,
-        text: chunk,
+        text: sections.join("\n"),
         unfurl_links: false,
         ...(username ? { username } : {}),
-        ...(last ? { blocks: [{ type: "section", text: { type: "mrkdwn", text: chunk } }, { type: "context", elements: [{ type: "mrkdwn", text: footer }] }] } : {}),
+        blocks: [
+          ...sections.map((s) => ({ type: "section", text: { type: "mrkdwn", text: s } })),
+          ...(last ? [{ type: "context", elements: [{ type: "mrkdwn", text: footer }] }] : []),
+        ],
       });
     }
     return "posted";

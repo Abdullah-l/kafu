@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { splitSections, answerBlocks, SECTION_MAX } from "../slack-format";
+import { splitSections, answerBlocks, messageSections, SECTION_MAX, MESSAGE_TEXT_MAX } from "../slack-format";
 
 const para = (n: number, len = 400) => Array.from({ length: n }, (_, i) => `Paragraph ${i}: ${"x".repeat(len)}`).join("\n\n");
 
@@ -38,5 +38,24 @@ describe("answer formatting", () => {
     expect(blocks.at(-1)).toEqual({ type: "context", elements: [] });
     expect(blocks.filter((b) => b.type === "section").length).toBeGreaterThan(1);
     expect(answerBlocks(para(400))).toBeNull();
+  });
+
+  test("a long list with no blank lines still fits Slack's section limit", () => {
+    const text = Array.from({ length: 12 }, (_, i) => `${i + 1}. ${"word ".repeat(60)}`).join("\n");
+    const messages = messageSections(text);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].length).toBeGreaterThan(1);
+    expect(messages[0].every((s) => s.length <= SECTION_MAX)).toBe(true);
+    expect(messages[0].join(" ").replace(/\s+/g, " ")).toBe(text.replace(/\s+/g, " ").trim());
+  });
+
+  test("very long answers are spread over several messages", () => {
+    const text = Array.from({ length: 60 }, () => "x".repeat(2000)).join("\n\n");
+    const messages = messageSections(text);
+    expect(messages.length).toBeGreaterThan(1);
+    for (const m of messages) {
+      expect(m.length).toBeLessThan(50);
+      expect(m.join("\n").length).toBeLessThanOrEqual(MESSAGE_TEXT_MAX);
+    }
   });
 });

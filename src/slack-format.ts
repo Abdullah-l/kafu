@@ -73,6 +73,16 @@ export function splitSections(text: string, max = SECTION_MAX): string[] {
   return sections;
 }
 
+export function messageSections(text: string): string[][] {
+  const messages: string[][] = [];
+  for (const section of splitSections(text)) {
+    const current = messages[messages.length - 1];
+    if (current && current.length < MAX_BLOCKS - 1 && current.join("\n").length + section.length + 1 <= MESSAGE_TEXT_MAX) current.push(section);
+    else messages.push([section]);
+  }
+  return messages;
+}
+
 export function answerBlocks(text: string, extra: Record<string, unknown>[] = []): Record<string, unknown>[] | null {
   const sections = splitSections(text);
   if (sections.length + extra.length > MAX_BLOCKS) return null;
