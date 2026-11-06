@@ -256,9 +256,9 @@ const RUN_LIMITS = ["--nproc=2048", "--nofile=8192", "--core=0"];
 const SANDBOX_MOUNTS = 'mount -t tmpfs -o mode=1777,size=2g,nosuid,nodev tmpfs /tmp && mount -t tmpfs -o mode=1777,size=256m,nosuid,nodev tmpfs /dev/shm && exec "$@"';
 
 export function sandboxCommand(args: string[], uid: number): string[] {
-  const drop = ["prlimit", ...RUN_LIMITS, "setpriv", `--reuid=${uid}`, `--regid=${uid}`, "--clear-groups", "--no-new-privs", "--inh-caps=-all", "--bounding-set=-all", ...args];
-  if (!namespacesAvailable()) return drop;
-  return ["unshare", "--pid", "--fork", "--kill-child", "--mount-proc", "--mount", "--propagation", "private", "sh", "-c", SANDBOX_MOUNTS, "kafu-sandbox", ...drop];
+  const setpriv = ["setpriv", `--reuid=${uid}`, `--regid=${uid}`, "--clear-groups", "--no-new-privs", "--inh-caps=-all", "--bounding-set=-all"];
+  if (!namespacesAvailable()) return ["prlimit", ...RUN_LIMITS, ...setpriv, ...args];
+  return ["unshare", "--pid", "--fork", "--kill-child", "--mount-proc", "--mount", "--propagation", "private", "sh", "-c", SANDBOX_MOUNTS, "kafu-sandbox", "prlimit", ...RUN_LIMITS, ...setpriv, "--pdeathsig=KILL", ...args];
 }
 
 async function rootOnly(path: string, mode: number): Promise<void> {
