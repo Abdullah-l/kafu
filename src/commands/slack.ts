@@ -986,7 +986,7 @@ export async function fetchLinkedThreads(
       const restricted = !info || info.is_private || info.is_im || info.is_mpim || /^[GD]/.test(link.channelId);
       if (requesterId && restricted) {
         const member = info?.is_im ? info.user === requesterId : await isChannelMember(token, link.channelId, requesterId).catch(() => false);
-        if (member === false) {
+        if (member !== true) {
           notes.push(`Slack link ${link.url} is in a private conversation the person asking isn't part of, so it wasn't read. Tell them you can't share it.`);
           continue;
         }

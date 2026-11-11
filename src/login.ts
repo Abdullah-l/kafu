@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { mkdir, writeFile, chmod } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, rm, writeFile, chmod } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Terminal } from "@xterm/headless";
 
@@ -22,6 +23,7 @@ interface PendingLogin {
   url: string;
   startedAt: number;
   timer: ReturnType<typeof setTimeout>;
+  configDir: string;
 }
 
 export interface LoginResult { ok: boolean; token?: string; error?: string }
@@ -88,6 +90,7 @@ export function cancelLogin(key: string): void {
   try { login.proc.kill(); } catch {}
   login.screen.dispose();
   pending.delete(key);
+  rm(login.configDir, { recursive: true, force: true }).catch(() => {});
 }
 
 export function hasPendingLogin(key: string): boolean {
@@ -103,13 +106,13 @@ export function looksLikeLoginCode(text: string): boolean {
   return /^[A-Za-z0-9_-]{10,}#[A-Za-z0-9_-]{10,}$/.test(text.trim());
 }
 
-export async function startLogin(key: string, configDir: string, executable = "claude"): Promise<string> {
+export async function startLogin(key: string, executable = "claude"): Promise<string> {
   const inFlight = starting.get(key);
   if (inFlight) return inFlight;
   const task = (async () => {
     cancelLogin(key);
     await ensureBrowserShim();
-    await mkdir(configDir, { recursive: true, mode: 0o700 });
+    const configDir = await mkdtemp(join(tmpdir(), "kafu-login-"));
 
     const login: PendingLogin = {
       proc: null as unknown as TerminalProc,
@@ -118,6 +121,7 @@ export async function startLogin(key: string, configDir: string, executable = "c
       url: "",
       startedAt: Date.now(),
       timer: setTimeout(() => cancelLogin(key), LOGIN_TTL_MS),
+      configDir,
     };
     const decoder = new TextDecoder();
     login.proc = Bun.spawn([executable, "setup-token"], {

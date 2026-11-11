@@ -1,5 +1,5 @@
 import { CLAUDE_EXECUTABLE } from "./runner";
-import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir, userScratchDir, setUserSecret, clearUserSecret, claudeAccountOwner, sharedAccountEnabled, isAccountAdmin } from "./users";
+import { getUser, saveUserToken, clearUserToken, setUserModel, userScratchDir, setUserSecret, clearUserSecret, claudeAccountOwner, sharedAccountEnabled, isAccountAdmin } from "./users";
 import { startGhDeviceLogin, startAppDeviceLogin, cancelGhLogin } from "./gh-login";
 import { startLogin, submitLoginCode, cancelLogin, pendingLoginUrl } from "./login";
 import { MODELS, modelLabel } from "./models";
@@ -100,7 +100,7 @@ export async function accountStatus(userId: string): Promise<AccountStatus> {
 export async function startClaudeLogin(userId: string, fresh = false): Promise<string> {
   const owner = claudeOwnerFor(userId);
   const existing = fresh ? null : pendingLoginUrl(claudeLoginKey(userId));
-  return existing ?? startLogin(claudeLoginKey(userId), userConfigDir(owner), CLAUDE_EXECUTABLE);
+  return existing ?? startLogin(claudeLoginKey(userId), CLAUDE_EXECUTABLE);
 }
 
 export async function finishClaudeLogin(userId: string, code: string): Promise<Result> {

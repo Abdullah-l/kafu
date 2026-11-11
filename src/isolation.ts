@@ -1,5 +1,5 @@
 import { existsSync, lstatSync } from "node:fs";
-import { chmod, chown, lstat, mkdir, readFile, readdir, readlink, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { chmod, chown, lchown, lstat, mkdir, readFile, readdir, readlink, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getSettings } from "./config";
 
@@ -11,6 +11,28 @@ const MANAGED_SETTINGS = "/etc/claude-code/managed-settings.json";
 const MEMORY_ENTRIES = ["CLAUDE.md", "CLAUDE.local.md", "rules", "skills", "commands", "agents", "hooks", "output-styles", "settings.json", "settings.local.json"];
 
 let uidLock: Promise<unknown> = Promise.resolve();
+
+function linuxRoot(): boolean {
+  return process.platform === "linux" && typeof process.getuid === "function" && process.getuid() === 0;
+}
+
+async function run(args: string[]): Promise<{ ok: boolean; stdout: string }> {
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+  const stdout = await new Response(proc.stdout).text();
+  return { ok: (await proc.exited) === 0, stdout };
+}
+
+function asUser(uid: number, args: string[]): string[] {
+  return ["setpriv", `--reuid=${uid}`, `--regid=${uid}`, "--clear-groups", "--no-new-privs", "--inh-caps=-all", "--bounding-set=-all", ...args];
+}
+
+export async function removeTree(path: string): Promise<void> {
+  if (linuxRoot()) {
+    await run(["rm", "-rf", "--one-file-system", "--", path]);
+    return;
+  }
+  await rm(path, { recursive: true, force: true });
+}
 
 export function isolationEnabled(): boolean {
   return typeof process.getuid === "function" && process.getuid() === 0 && getSettings().multiUser.enabled;
@@ -130,7 +152,7 @@ export async function pruneTemporaryFiles(maxAgeDays: number): Promise<PruneRepo
       const stat = await lstat(path);
       if (stat.uid < FIRST_UID || stat.mtimeMs < cutoff) {
         report.bytes += await dirSize(path);
-        await rm(path, { recursive: true, force: true });
+        await removeTree(path);
         report.workDirs++;
       }
     } catch {}
@@ -140,15 +162,41 @@ export async function pruneTemporaryFiles(maxAgeDays: number): Promise<PruneRepo
   await pruneOldFiles(join(KAFU_DIR, "logs"), cutoff, report);
   const users = join(KAFU_DIR, "users");
   for (const id of await readdir(users).catch(() => [] as string[])) {
-    await pruneOldFiles(join(users, id, "tmp"), cutoff, report);
-    await pruneOldFiles(join(users, id, "home", ".cache"), cutoff, report);
-    await pruneOldFiles(join(users, id, "home", ".npm", "_cacache"), cutoff, report);
+    const trees = [join(users, id, "tmp"), join(users, id, "home", ".cache"), join(users, id, "home", ".npm", "_cacache")];
     const projects = join(users, id, "claude", "projects");
+    if (linuxRoot()) {
+      const uid = await userTreeOwner(join(users, id));
+      if (uid === null) continue;
+      for (const tree of [...trees, projects]) await pruneAsUser(uid, tree, maxAgeDays, tree === projects ? 2 : 1, report);
+      continue;
+    }
+    for (const tree of trees) await pruneOldFiles(tree, cutoff, report);
     for (const project of await readdir(projects).catch(() => [] as string[])) {
       await pruneOldFiles(join(projects, project), cutoff, report);
     }
   }
   return report;
+}
+
+async function userTreeOwner(userDir: string): Promise<number | null> {
+  for (const entry of ["tmp", "home", "claude"]) {
+    try {
+      const stat = await lstat(join(userDir, entry));
+      if (stat.isDirectory() && stat.uid >= FIRST_UID) return stat.uid;
+    } catch {}
+  }
+  return null;
+}
+
+async function pruneAsUser(uid: number, dir: string, maxAgeDays: number, keepDepth: number, report: PruneReport): Promise<void> {
+  const minutes = String(Math.max(1, Math.floor(maxAgeDays * 24 * 60)));
+  const files = await run(asUser(uid, ["find", dir, "-xdev", "-mindepth", "1", "!", "-type", "d", "-mmin", `+${minutes}`, "-printf", "%s\\n", "-delete"]));
+  for (const line of files.stdout.split("\n")) {
+    if (!line) continue;
+    report.files++;
+    report.bytes += Number(line) || 0;
+  }
+  await run(asUser(uid, ["find", dir, "-xdev", "-mindepth", String(keepDepth), "-depth", "-type", "d", "-empty", "-delete"]));
 }
 
 async function chownTree(path: string, uid: number): Promise<void> {
@@ -159,7 +207,11 @@ async function chownTree(path: string, uid: number): Promise<void> {
     return;
   }
   if (stat.isSymbolicLink()) return;
-  if (stat.uid !== uid || stat.gid !== uid) await chown(path, uid, uid);
+  if (linuxRoot()) {
+    await run(["chown", "-R", "-P", "--no-dereference", `${uid}:${uid}`, "--", path]);
+    return;
+  }
+  if (stat.uid !== uid || stat.gid !== uid) await lchown(path, uid, uid);
   if (!stat.isDirectory()) return;
   for (const entry of await readdir(path)) await chownTree(join(path, entry), uid);
 }
@@ -192,12 +244,21 @@ async function ownedDir(path: string, uid: number, mode = 0o700): Promise<void> 
   await chmod(path, mode);
 }
 
-async function stripMemory(dir: string): Promise<void> {
-  await Promise.all(MEMORY_ENTRIES.map((name) => rm(join(dir, name), { recursive: true, force: true })));
+async function stripMemory(dir: string, uid?: number, extra: string[] = []): Promise<void> {
+  const paths = [...MEMORY_ENTRIES, ...extra].map((name) => join(dir, name));
+  if (uid !== undefined && linuxRoot()) {
+    await run(asUser(uid, ["rm", "-rf", "--", ...paths]));
+    return;
+  }
+  await Promise.all(paths.map((path) => rm(path, { recursive: true, force: true })));
 }
 
-async function stripProjectMemory(configDir: string): Promise<void> {
+async function stripProjectMemory(configDir: string, uid: number): Promise<void> {
   const projects = join(configDir, "projects");
+  if (linuxRoot()) {
+    await run(asUser(uid, ["find", projects, "-mindepth", "2", "-maxdepth", "2", "-name", "memory", "-exec", "rm", "-rf", "--", "{}", "+"]));
+    return;
+  }
   let dirs: string[] = [];
   try {
     dirs = await readdir(projects);
@@ -219,20 +280,19 @@ export async function prepareSandbox(opts: {
   await chown(opts.userDir, 0, 0);
   await chmod(opts.userDir, 0o711);
   await ownedDir(opts.configDir, opts.uid);
-  await stripMemory(opts.configDir);
-  await stripProjectMemory(opts.configDir);
   await chownTree(opts.configDir, opts.uid);
+  await stripMemory(opts.configDir, opts.uid);
+  await stripProjectMemory(opts.configDir, opts.uid);
   await ownedDir(opts.homeDir, opts.uid);
   await ownedDir(join(opts.userDir, "tmp"), opts.uid);
   await chownTree(join(opts.userDir, "tmp"), opts.uid);
-  await stripMemory(join(opts.homeDir, ".claude"));
+  await stripMemory(join(opts.homeDir, ".claude"), opts.uid);
   if (opts.workDir) {
     await ownedDir(opts.workDir, opts.uid);
     const now = new Date();
     await utimes(opts.workDir, now, now).catch(() => {});
-    await stripMemory(opts.workDir);
-    await rm(join(opts.workDir, ".claude"), { recursive: true, force: true });
     await chownTree(opts.workDir, opts.uid);
+    await stripMemory(opts.workDir, opts.uid, [".claude"]);
   }
   for (const path of opts.readable) {
     try {

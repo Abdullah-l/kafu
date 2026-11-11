@@ -1,5 +1,5 @@
 import { CLAUDE_EXECUTABLE } from "../runner";
-import { getUser, saveUserToken, clearUserToken, setUserModel, userConfigDir, userScratchDir, setUserSecret, clearUserSecret, sharedAccountEnabled, isAccountAdmin, claudeAccountOwner } from "../users";
+import { getUser, saveUserToken, clearUserToken, setUserModel, userScratchDir, setUserSecret, clearUserSecret, sharedAccountEnabled, isAccountAdmin, claudeAccountOwner } from "../users";
 import { startGhDeviceLogin, cancelGhLogin } from "../gh-login";
 import { startLogin, submitLoginCode, cancelLogin, hasPendingLogin, pendingLoginUrl, looksLikeLoginCode } from "../login";
 import { MODELS, modelLabel } from "../models";
@@ -194,7 +194,7 @@ export async function sendLoginLink(userId: string, io: AccountIO, fromChannel: 
   if (fromChannel) await io.reply(`<@${userId}> connect your Claude account first. I've sent you a DM.`);
   let url: string;
   try {
-    url = (!fresh && pendingLoginUrl(loginKey(userId))) || await startLogin(loginKey(userId), userConfigDir(userId), CLAUDE_EXECUTABLE);
+    url = (!fresh && pendingLoginUrl(loginKey(userId))) || await startLogin(loginKey(userId), CLAUDE_EXECUTABLE);
   } catch (err) {
     await io.dm(`I couldn't start the Claude sign-in: ${err instanceof Error ? err.message : err}`);
     return;

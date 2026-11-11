@@ -1,5 +1,6 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { chown, readFile, writeFile } from "node:fs/promises";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { constants } from "node:fs";
+import { open, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { deriveKey } from "./users";
 
@@ -24,8 +25,20 @@ export async function verifyRunToken(token: string): Promise<string | null> {
 
 export async function writeRunToken(userId: string, homeDir: string, uid: number): Promise<void> {
   const path = join(homeDir, RUN_TOKEN_FILE);
-  await writeFile(path, `${await runToken(userId)}\n`, { mode: 0o600 });
-  await chown(path, uid, uid);
+  const temp = join(homeDir, `${RUN_TOKEN_FILE}.${randomBytes(8).toString("hex")}`);
+  const handle = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try {
+    await handle.writeFile(`${await runToken(userId)}\n`);
+    await handle.chown(uid, uid);
+  } finally {
+    await handle.close();
+  }
+  try {
+    await rename(temp, path);
+  } catch (err) {
+    await rm(temp, { force: true });
+    throw err;
+  }
 }
 
 export async function readRunToken(home = process.env.HOME ?? ""): Promise<string> {
