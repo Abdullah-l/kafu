@@ -3,6 +3,7 @@ import { join, dirname, resolve, sep } from "path";
 import { isolationEnabled, runUid, prepareSandbox, sandboxCommand } from "./isolation";
 import { writeRunToken } from "./run-token";
 import { slackMcpServerEntry } from "./slack-tools";
+import { brokerConfig, brokeredEnvNames, readSharedMcpConfig, sharedMcpConfigPath } from "./mcp-broker";
 import { execSync } from "child_process";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "fs";
 import {
@@ -88,10 +89,13 @@ function cleanSpawnEnv(): Record<string, string> {
   return out;
 }
 
-function identitySpawnEnv(identity: RunIdentity): Record<string, string> {
+async function identitySpawnEnv(identity: RunIdentity): Promise<Record<string, string>> {
   const env = cleanSpawnEnv();
   for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "KAFU_SECRET_KEY", "KAFU_HANDOFF_SECRET", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "TELEGRAM_TOKEN"]) {
     delete env[key];
+  }
+  if (isolationEnabled()) {
+    for (const key of brokeredEnvNames(await readSharedMcpConfig())) delete env[key];
   }
   env.CLAUDE_CODE_OAUTH_TOKEN = identity.token;
   env.CLAUDE_CONFIG_DIR = identity.configDir;
@@ -109,7 +113,7 @@ async function identityMcpConfig(identity: RunIdentity): Promise<{ path: string 
   const sharedPath = sharedMcpConfigPath();
   const builtIn = isolationEnabled() && getSettings().slack.botToken ? { slack: slackMcpServerEntry() } : {};
   if (!sharedPath && Object.keys(builtIn).length === 0) return { path: null, missing: missingSpecs.map((s) => s.id) };
-  if (specs.length === 0 && Object.keys(builtIn).length === 0) return { path: sharedPath, missing: [] };
+  if (specs.length === 0 && Object.keys(builtIn).length === 0 && !isolationEnabled()) return { path: sharedPath, missing: [] };
 
   let shared: McpConfigFile = { mcpServers: {} };
   if (sharedPath) {
@@ -119,7 +123,8 @@ async function identityMcpConfig(identity: RunIdentity): Promise<{ path: string 
       console.error(`[${new Date().toLocaleTimeString()}] Failed to read shared MCP config ${sharedPath}:`, err);
     }
   }
-  const { config } = filterMcpConfig(shared, new Set(missingSpecs.map((s) => s.env)));
+  const filtered = filterMcpConfig(shared, new Set(missingSpecs.map((s) => s.env))).config;
+  const config = isolationEnabled() ? brokerConfig(filtered) : filtered;
   config.mcpServers = { ...(config.mcpServers ?? {}), ...builtIn };
   const target = join(dirname(identity.configDir), "mcp.json");
   const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
@@ -128,11 +133,6 @@ async function identityMcpConfig(identity: RunIdentity): Promise<{ path: string 
   return { path: target, missing: missingSpecs.map((s) => s.id) };
 }
 
-function sharedMcpConfigPath(): string | null {
-  const configured = getSettings().multiUser.mcpConfig;
-  const path = configured ? resolve(process.cwd(), configured) : join(process.cwd(), ".mcp.json");
-  return existsSync(path) ? path : null;
-}
 
 export type CompactEvent =
   | { type: "warn"; turnCount: number }
@@ -1167,7 +1167,7 @@ async function execClaude(
     args.push("--append-system-prompt", appendParts.join("\n\n"));
   }
 
-  const baseEnv = identity ? identitySpawnEnv(identity) : cleanSpawnEnv();
+  const baseEnv = identity ? await identitySpawnEnv(identity) : cleanSpawnEnv();
   const spawnCwd = agentName ? await ensureAgentDir(agentName) : undefined;
   if (identity && isolationEnabled()) {
     const uid = await runUid(identity.userId);

@@ -904,6 +904,23 @@ async function slackUserName(token: string, userId: string): Promise<string> {
   return name;
 }
 
+const memberChecks = new Map<string, { ok: boolean; at: number }>();
+
+async function isWorkspaceMember(token: string, userId: string): Promise<boolean | null> {
+  const cached = memberChecks.get(userId);
+  if (cached && Date.now() - cached.at < NAME_TTL_MS) return cached.ok;
+  try {
+    const data = await slackGet<{ user: { deleted?: boolean; is_bot?: boolean; is_restricted?: boolean; is_ultra_restricted?: boolean; is_stranger?: boolean; team_id?: string } }>(token, "users.info", { user: userId });
+    const user = data.user;
+    const ok = !user.deleted && !user.is_restricted && !user.is_ultra_restricted && !user.is_stranger && (!botTeamId || !user.team_id || user.team_id === botTeamId);
+    memberChecks.set(userId, { ok, at: Date.now() });
+    return ok;
+  } catch (err) {
+    debugLog(`users.info ${userId} failed: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+}
+
 async function slackChannelInfo(token: string, channelId: string): Promise<SlackChannelInfo | null> {
   const cached = channelInfos.get(channelId);
   if (cached && Date.now() - cached.at < NAME_TTL_MS) return cached.info;
@@ -1433,6 +1450,20 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       await sendMessage(config.botToken, channelId, "Unauthorized.");
     }
     return;
+  }
+
+  if (!watched && !isBotAllowed && !config.allowGuests && !handoff) {
+    const member = userId ? await isWorkspaceMember(config.botToken, userId) : false;
+    if (member === null) {
+      if (isDirectMessage) await sendMessage(config.botToken, channelId, "I couldn't check your Slack account just now. Try again in a minute.");
+      else await sendReaction(config.botToken, channelId, event.ts, "warning");
+      return;
+    }
+    if (!member) {
+      debugLog(`Skip guest or external user ${userId} in ${channelId}`);
+      if (isDirectMessage) await sendMessage(config.botToken, channelId, "Unauthorized.");
+      return;
+    }
   }
 
   let cleanText = watched ? watched.prompt : handoff ? handoff.text : event.text;

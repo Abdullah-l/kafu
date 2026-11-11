@@ -14,6 +14,7 @@ import { startPortal, stopPortal } from "../portal/server";
 import { isolationEnabled, hardenWorkspace, writeManagedSettings, pruneTemporaryFiles } from "../isolation";
 import { startSharedCache } from "../shared-cache";
 import { startSlackTools } from "../slack-tools";
+import { startMcpBroker } from "../mcp-broker";
 
 const CLAUDE_DIR = join(process.cwd(), ".claude");
 const STATUSLINE_FILE = join(CLAUDE_DIR, "statusline.cjs");
@@ -372,6 +373,9 @@ export async function start(args: string[] = []) {
         const { ensureScheduler } = await import("../schedules");
         ensurePrCardPoller();
         ensureScheduler();
+      }
+      if (await startMcpBroker().catch((err) => { console.error(`[${ts()}] MCP broker failed to start:`, err); return false; })) {
+        console.log(`[${ts()}] MCP broker: shared-key MCP servers run outside people's sandboxes`);
       }
       const { namespacesAvailable } = await import("../isolation");
       console.log(`[${ts()}] Isolation: each person's runs use their own OS user${namespacesAvailable() ? " in their own process namespace" : " (no process namespaces: add the SYS_ADMIN capability to hide other runs)"}; ${currentSettings.multiUser.protectedRepos.length} protected repo(s)`);

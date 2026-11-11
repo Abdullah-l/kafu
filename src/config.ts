@@ -60,7 +60,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezone: "UTC",
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
-  slack: { botToken: "", appToken: "", allowedUserIds: [], listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, allowedPrivateChannels: [], watchChannels: [], handoff: null, acceptHandoffsFrom: [] },
+  slack: { botToken: "", appToken: "", allowedUserIds: [], allowGuests: false, listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, allowedPrivateChannels: [], watchChannels: [], handoff: null, acceptHandoffsFrom: [] },
   multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], tempFileTtlDays: 14, sharedCache: null, sharedAccount: { enabled: false, admins: [] }, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
@@ -85,6 +85,7 @@ export interface SlackConfig {
   botToken: string;
   appToken: string;
   allowedUserIds: string[];
+  allowGuests: boolean;
   listenChannels: string[];
   allowBots: string[];
   allowBotIds: string[];
@@ -393,6 +394,7 @@ function parseSettings(raw: Record<string, any>): Settings {
       botToken: process.env.SLACK_BOT_TOKEN?.trim() || (typeof raw.slack?.botToken === "string" ? raw.slack.botToken.trim() : ""),
       appToken: process.env.SLACK_APP_TOKEN?.trim() || (typeof raw.slack?.appToken === "string" ? raw.slack.appToken.trim() : ""),
       allowedUserIds: Array.isArray(raw.slack?.allowedUserIds) ? raw.slack.allowedUserIds.map(String) : [],
+      allowGuests: raw.slack?.allowGuests === true,
       listenChannels: Array.isArray(raw.slack?.listenChannels) ? raw.slack.listenChannels.map(String) : [],
       allowBots: Array.isArray(raw.slack?.allowBots) ? raw.slack.allowBots.map(String) : [],
       allowBotIds: Array.isArray(raw.slack?.allowBotIds) ? raw.slack.allowBotIds.map(String) : [],
