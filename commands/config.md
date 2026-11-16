@@ -97,6 +97,7 @@ Ask for confirmation with **AskUserQuestion**, then write the defaults:
 | `slack.allowedUserIds` | string[] | Slack member IDs allowed to talk to the bot (`"*"` = everyone) |
 | `slack.listenChannels` | string[] | Channels answered without an @mention |
 | `slack.allowBots` | string[] | Channels where other bots' messages are passed through |
+| `slack.forwardInteractions` | object[] | `{ prefix, url, secretEnv }`: send matching buttons/modals to another service (see below) |
 | `multiUser.enabled` | boolean | Each Slack user signs in with their own Claude account (DM `login`) |
 | `multiUser.mcpConfig` | string | Shared MCP config for all users (default `.mcp.json`) |
 | `telegram.token` | string | Bot token from @BotFather |
@@ -107,3 +108,9 @@ Ask for confirmation with **AskUserQuestion**, then write the defaults:
 | `security.disallowedTools` | string[] | Tools to block |
 | `timeouts.telegram` / `timeouts.slack` / `timeouts.default` | number | Max minutes per run |
 | `web.enabled` / `web.host` / `web.port` | | Local dashboard |
+
+`slack.forwardInteractions` hands Slack buttons and modals owned by another service straight to it; they never reach Claude and skip kafu's allowlist (the service authorizes them itself). A button whose `action_id`, or a modal whose `callback_id`, starts with `prefix` (lowercase, ending in `_`) is POSTed as JSON to `url`, with `X-Kafu-Request-Timestamp` and `X-Kafu-Signature: v1=<hex HMAC-SHA256 of "v1:<timestamp>:<body>">` keyed by the env var named in `secretEnv`. A modal submit waits up to 2.5s for the reply and passes a `response_action` object in it back to Slack.
+
+```json
+"forwardInteractions": [{ "prefix": "cr_", "url": "http://signoff:3000/slack/interactions", "secretEnv": "SIGNOFF_FORWARD_SECRET" }]
+```
