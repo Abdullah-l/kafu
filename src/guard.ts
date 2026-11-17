@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { isAbsolute, resolve, sep } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 export interface GuardInput {
   tool_name?: string;
@@ -19,12 +19,17 @@ const MERGE_REASON = "Merging is done by people on GitHub after review; I can op
 const SETTINGS_REASON = "I can't change repository or organization settings, secrets, workflows or releases; ask someone with access to do it on GitHub.";
 const BRANCH_REASON = "I can't push to or delete develop, main or master; I push my own branch and open a PR instead.";
 const HOOK_REASON = "Pushes have to go through the repo's git hooks; fix what they report and push again.";
+const LITERAL_PUSH_REASON = "Push with a literal branch name or HEAD, without shell expansion.";
 const ALLOWED_MUTATIONS = new Set([
   "addComment", "addPullRequestReview", "addPullRequestReviewComment", "addPullRequestReviewThread", "submitPullRequestReview",
   "createPullRequest", "updatePullRequest", "markPullRequestReadyForReview", "convertPullRequestToDraft", "requestReviews",
   "resolveReviewThread", "unresolveReviewThread", "updatePullRequestBranch", "addReaction", "removeReaction",
 ]);
 const PR_WRITE_PATH = /^\/?repos\/[^/\s]+\/[^/\s]+\/(pulls|issues)(\/\d+)?(\/(comments|reviews|requested_reviewers|labels|assignees|reactions|replies)(\/[^\s]*)?)?$|^\/?repos\/[^/\s]+\/[^/\s]+\/(pulls|issues)\/comments\/\d+(\/(reactions|replies))?$/;
+
+function unquote(text: string): string {
+  return text.replace(/\\(.)/g, "$1").replace(/['"]/g, "");
+}
 
 function splitCommands(command: string): string[] {
   return command.split(/&&|\|\||;|\n|\|/).map((s) => s.trim()).filter(Boolean);
@@ -67,9 +72,13 @@ function ghApiReason(segment: string): string | null {
 
 function gitPushReason(segment: string, cwd: string, ctx: GuardContext): string | null {
   const w = words(segment);
-  const at = w.indexOf("push");
-  if (at < 0 || !w.slice(0, at).some((x) => x === "git" || x.endsWith("/git"))) return null;
+  const gitAt = w.findIndex((x) => x === "git" || x.endsWith("/git"));
+  if (gitAt < 0) return null;
+  let at = gitAt + 1;
+  while (at < w.length && w[at].startsWith("-")) at += ["-C", "-c", "--git-dir", "--work-tree", "--namespace"].includes(w[at]) ? 2 : 1;
+  if (w[at] !== "push") return null;
   const args = w.slice(at + 1);
+  if (/\$|`/.test(segment.slice(segment.indexOf("push")))) return LITERAL_PUSH_REASON;
   if (args.some((a) => ["--delete", "-d", "--mirror", "--all", "--tags", "--prune"].includes(a))) return BRANCH_REASON;
   if (args.includes("--no-verify")) return HOOK_REASON;
   const positional = args.filter((a) => !a.startsWith("-"));
@@ -92,21 +101,27 @@ function gitPushReason(segment: string, cwd: string, ctx: GuardContext): string 
 }
 
 export function githubPolicy(command: string, cwd: string, ctx: GuardContext): string | null {
-  for (const segment of splitCommands(command)) {
-    if (/\bgh\s+pr\s+merge\b/.test(segment)) return MERGE_REASON;
-    if (/core\.hookspath|GIT_CONFIG_(COUNT|KEY|VALUE|PARAMETERS)/i.test(segment)) return HOOK_REASON;
-    if (/\bgh\s+repo\s+(edit|delete|archive|unarchive|rename|deploy-key|set-default|sync|autolink)\b/.test(segment)) return SETTINGS_REASON;
-    if (/\bgh\s+(secret|variable|ruleset|ssh-key|gpg-key|org|codespace|attestation)\b/.test(segment)) return SETTINGS_REASON;
-    if (/\bgh\s+(workflow\s+(run|enable|disable)|run\s+(rerun|cancel|delete)|release\s+(create|delete|edit|upload|delete-asset)|cache\s+delete|label\s+(create|edit|delete|clone))\b/.test(segment)) return SETTINGS_REASON;
-    const api = ghApiReason(segment);
-    if (api) return api;
-    if (/\b(curl|wget|http)\b/.test(segment) && /api\.github\.com|github\.com\/api/.test(segment) && /(-X\s*(POST|PUT|PATCH|DELETE)|--request\s+(POST|PUT|PATCH|DELETE)|\s-d\s|--data|--method=(POST|PUT|PATCH|DELETE))/i.test(segment)) {
-      return "Use gh for GitHub changes so the usual checks apply.";
+  for (const raw of splitCommands(command)) {
+    for (const segment of new Set([raw, unquote(raw)])) {
+      const reason = segmentPolicy(segment, cwd, ctx);
+      if (reason) return reason;
     }
-    const push = gitPushReason(segment, cwd, ctx);
-    if (push) return push;
   }
   return null;
+}
+
+function segmentPolicy(segment: string, cwd: string, ctx: GuardContext): string | null {
+  if (/\bgh\s+pr\s+merge\b/.test(segment)) return MERGE_REASON;
+  if (/core\.hookspath|GIT_CONFIG_(COUNT|KEY|VALUE|PARAMETERS)/i.test(segment)) return HOOK_REASON;
+  if (/\bgh\s+repo\s+(edit|delete|archive|unarchive|rename|deploy-key|set-default|sync|autolink)\b/.test(segment)) return SETTINGS_REASON;
+  if (/\bgh\s+(secret|variable|ruleset|ssh-key|gpg-key|org|codespace|attestation)\b/.test(segment)) return SETTINGS_REASON;
+  if (/\bgh\s+(workflow\s+(run|enable|disable)|run\s+(rerun|cancel|delete)|release\s+(create|delete|edit|upload|delete-asset)|cache\s+delete|label\s+(create|edit|delete|clone))\b/.test(segment)) return SETTINGS_REASON;
+  const api = ghApiReason(segment);
+  if (api) return api;
+  if (/\b(curl|wget|http)\b/.test(segment) && /api\.github\.com|github\.com\/api/.test(segment) && /(-X\s*(POST|PUT|PATCH|DELETE)|--request\s+(POST|PUT|PATCH|DELETE)|\s-d\s|--data|--method=(POST|PUT|PATCH|DELETE))/i.test(segment)) {
+    return "Use gh for GitHub changes so the usual checks apply.";
+  }
+  return gitPushReason(segment, cwd, ctx);
 }
 
 const MEMORY_NAME = /(^|\/)(CLAUDE|CLAUDE\.local)\.md$/i;
@@ -140,16 +155,62 @@ function protectedRoots(env: Record<string, string | undefined>): string[] {
   return roots;
 }
 
-function isMemoryPath(path: string, cwd: string, env: Record<string, string | undefined>): boolean {
-  const full = resolve(cwd, path);
-  if (protectedRoots(env).some((root) => full === root || full.startsWith(root + sep))) return true;
-  const workDir = env.KAFU_WORKDIR ? resolve(env.KAFU_WORKDIR) : null;
-  if (workDir) {
-    const rel = full.startsWith(workDir + sep) ? full.slice(workDir.length + 1) : null;
-    if (rel !== null && (/^(CLAUDE|CLAUDE\.local)\.md$/i.test(rel) || rel === ".claude" || rel.startsWith(".claude/") || rel === ".mcp.json")) return true;
-    if (!full.startsWith(workDir + sep) && MEMORY_NAME.test(full)) return true;
+function realPath(path: string): string {
+  let dir = path;
+  const rest: string[] = [];
+  while (!existsSync(dir)) {
+    const parent = dirname(dir);
+    if (parent === dir) return path;
+    rest.unshift(basename(dir));
+    dir = parent;
+  }
+  try {
+    return join(realpathSync(dir), ...rest);
+  } catch {
+    return path;
+  }
+}
+
+function isInside(path: string, dir: string): boolean {
+  return path.startsWith(dir + sep);
+}
+
+function inCheckoutUnder(path: string, base: string): boolean {
+  for (let dir = dirname(path); isInside(dir, base); dir = dirname(dir)) {
+    if (existsSync(join(dir, ".git"))) return true;
   }
   return false;
+}
+
+function isMemoryFile(full: string, env: Record<string, string | undefined>, norm: (p: string) => string): boolean {
+  if (protectedRoots(env).map(norm).some((root) => full === root || isInside(full, root))) return true;
+  const workDir = env.KAFU_WORKDIR ? norm(resolve(env.KAFU_WORKDIR)) : null;
+  if (!workDir) return false;
+  if (isInside(full, workDir)) {
+    const rel = full.slice(workDir.length + 1);
+    return /^(CLAUDE|CLAUDE\.local)\.md$/i.test(rel) || rel === ".claude" || rel.startsWith(".claude/") || rel === ".mcp.json";
+  }
+  if (!MEMORY_NAME.test(full)) return false;
+  const tmpDir = env.TMPDIR ? norm(resolve(env.TMPDIR)) : null;
+  return !(tmpDir && isInside(full, tmpDir) && inCheckoutUnder(full, tmpDir));
+}
+
+function isMemoryPath(path: string, cwd: string, env: Record<string, string | undefined>): boolean {
+  const full = resolve(cwd, path);
+  return isMemoryFile(full, env, (p) => p) || isMemoryFile(realPath(full), env, realPath);
+}
+
+const MESSAGE_ARG = /(\b(?:git\b[^;&|\n]*\b(?:commit|tag)|gh\s+(?:pr|issue)\s+(?:create|edit|comment|review))\b[^;&|\n]*?\s)(-m|--message|-t|--title|-b|--body)(=|\s+)("(?:[^"\\$`]|\\.)+"|'[^']+')/;
+
+function stripMessageText(command: string): string {
+  let out = command
+    .replace(/\$\(cat\s+<<-?\s*'(\w+)'[ \t]*\n[\s\S]*?\n[ \t]*\1[ \t]*\n[ \t]*\)/g, "")
+    .replace(/(\d*>&\d+|&>\s*\/dev\/null|\d*>>?\s*\/dev\/null)(?![^\s;&|)])/g, " ");
+  for (let prev = ""; prev !== out; ) {
+    prev = out;
+    out = out.replace(MESSAGE_ARG, "$1$2$3''");
+  }
+  return out;
 }
 
 export function decide(input: GuardInput, ctx: GuardContext): string | null {
@@ -160,9 +221,10 @@ export function decide(input: GuardInput, ctx: GuardContext): string | null {
 
   if (tool === "Bash") {
     const command = String(toolInput.command ?? "");
-    const repo = mentionsRepo(command, ctx.repos);
-    if (repo && NETWORK_WRITE.test(command)) return `${repo} is protected: I can't push, open PRs, or call GitHub for it.`;
-    if (PUBLISH.test(command)) {
+    const plain = unquote(command);
+    const repo = mentionsRepo(command, ctx.repos) ?? mentionsRepo(plain, ctx.repos);
+    if (repo && (NETWORK_WRITE.test(command) || NETWORK_WRITE.test(plain))) return `${repo} is protected: I can't push, open PRs, or call GitHub for it.`;
+    if (PUBLISH.test(command) || PUBLISH.test(plain)) {
       for (const dir of candidateDirs(command, cwd)) {
         if (!existsSync(dir)) continue;
         const hit = ctx.remotesOf(dir).map((url) => mentionsRepo(url, ctx.repos)).find(Boolean);
@@ -171,8 +233,9 @@ export function decide(input: GuardInput, ctx: GuardContext): string | null {
     }
     const policy = githubPolicy(command, cwd, ctx);
     if (policy) return policy;
-    const outsideKafuData = command.replace(/[^\s'"`]*\/\.claude\/kafu\/[^\s'"`]*/g, " ");
-    if (MEMORY_REF.test(outsideKafuData) && FILE_WRITE.test(command)) {
+    const shell = stripMessageText(command);
+    const outsideKafuData = shell.replace(/[^\s'"`]*\/\.claude\/kafu\/[^\s'"`]*/g, " ");
+    if (MEMORY_REF.test(outsideKafuData) && FILE_WRITE.test(shell)) {
       return "My instruction files (CLAUDE.md, .claude settings) can't be changed from a chat.";
     }
     return null;

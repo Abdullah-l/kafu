@@ -935,6 +935,18 @@ async function slackChannelInfo(token: string, channelId: string): Promise<Slack
   return info;
 }
 
+async function canReadChannel(token: string, channelId: string, userId?: string): Promise<boolean> {
+  if (!userId) return false;
+  const info = await slackChannelInfo(token, channelId).catch(() => null);
+  if (!info) return false;
+  const config = getSettings().slack;
+  const restricted = info.is_private || info.is_im || info.is_mpim || /^[GD]/.test(channelId);
+  if (!restricted) return true;
+  if (config.publicChannelsOnly && !config.allowedPrivateChannels.includes(channelId)) return false;
+  if (info.is_im) return info.user === userId;
+  return (await isChannelMember(token, channelId, userId).catch(() => false)) === true;
+}
+
 async function isChannelMember(token: string, channelId: string, userId: string): Promise<boolean | null> {
   let cursor = "";
   try {
@@ -991,6 +1003,7 @@ export async function fetchLinkedThreads(
   current: { channelId: string; threadTs: string },
   requesterId?: string,
   delivered?: Set<string>,
+  privateAllowed = true,
 ): Promise<{ context: string; images: { path: string; user?: string }[]; files: string[] }> {
   const notes: string[] = [];
   const images: { path: string; user?: string }[] = [];
@@ -1002,6 +1015,10 @@ export async function fetchLinkedThreads(
     try {
       const info = await slackChannelInfo(token, link.channelId);
       const restricted = !info || info.is_private || info.is_im || info.is_mpim || /^[GD]/.test(link.channelId);
+      if (restricted && !privateAllowed) {
+        notes.push(`Slack link ${link.url} is in a private conversation, so it wasn't read here.`);
+        continue;
+      }
       if (requesterId && restricted) {
         const member = info?.is_im ? info.user === requesterId : await isChannelMember(token, link.channelId, requesterId).catch(() => false);
         if (member !== true) {
@@ -1608,12 +1625,12 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       let linkSource = cleanText;
       if (inThread) {
         const history = await fetchThreadHistory(config.botToken, channelId, event.thread_ts!, 200).catch(() => []);
-        linkSource = [...history.filter((m) => m.role === "user" && m.ts !== event.ts).map((m) => m.text ?? ""), cleanText].join("\n");
+        linkSource = [...history.filter((m) => m.role === "user" && m.ts !== event.ts && m.user === (actingUserId ?? userId)).map((m) => m.text ?? ""), cleanText].join("\n");
       }
       const deliveredKey = sessionThreadId ?? `${channelId}:${replyThreadTs}`;
       const delivered = deliveredLinks.get(deliveredKey) ?? new Set<string>();
       deliveredLinks.set(deliveredKey, delivered);
-      linkedThreads = await fetchLinkedThreads(config.botToken, linkSource, { channelId, threadTs: replyThreadTs }, actingUserId ?? userId, delivered);
+      linkedThreads = await fetchLinkedThreads(config.botToken, linkSource, { channelId, threadTs: replyThreadTs }, actingUserId ?? userId, delivered, !watched);
     } catch (err) {
       debugLog(`Failed to fetch linked Slack threads: ${err instanceof Error ? err.message : err}`);
     }
@@ -1663,10 +1680,11 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       }
     }
 
-    const wizardCtx = { iface: "slack" as const, scopeId: channelId };
+    const wizardCtx = { iface: "slack" as const, scopeId: `${channelId}:${userId ?? ""}` };
     const firstWord = cleanText.trim().split(/\s+/, 1)[0].toLowerCase();
-    if ((cleanText.trim().startsWith("/") && isWizardTrigger(firstWord)) || hasActiveWizard(wizardCtx)) {
-      const reply = await handleWizardInput(wizardCtx, cleanText.trim());
+    if (!watched && !handoff && ((cleanText.trim().startsWith("/") && isWizardTrigger(firstWord)) || hasActiveWizard(wizardCtx))) {
+      const pluginAdmin = !isMultiUser() || (!!event.user && getSettings().multiUser.sharedAccount.admins.includes(event.user));
+      const reply = pluginAdmin ? await handleWizardInput(wizardCtx, cleanText.trim()) : "Only admins can manage plugins.";
       await sendMessage(config.botToken, channelId, reply, replyThreadTs);
       return;
     }
@@ -1966,9 +1984,9 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
 
 
 
-      const approvedChannels = new Set([channelId, ...config.listenChannels]);
       for (const read of channelReads) {
-        if (!approvedChannels.has(read.channelId)) {
+        const approved = read.channelId === channelId || (config.listenChannels.includes(read.channelId) && await canReadChannel(config.botToken, read.channelId, actingUserId ?? userId));
+        if (!approved) {
           debugLog(`[read_channel] rejected: ${read.channelId} not in approved channels`);
           continue;
         }
@@ -2100,6 +2118,9 @@ async function handleBlockAction(payload: any): Promise<void> {
   if (!actions?.length || !channelId || !user?.id) return;
 
   if (!isUserAllowed(config.allowedUserIds, user.id)) {
+    return;
+  }
+  if (!config.allowGuests && (await isWorkspaceMember(config.botToken, user.id)) !== true) {
     return;
   }
 

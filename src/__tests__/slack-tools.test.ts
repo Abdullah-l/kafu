@@ -19,7 +19,7 @@ describe("slack tools", () => {
     const out = await runInDir(dir, `
       const calls = [];
       const users = [
-        { id: "U0ABDULLAH", name: "abdullah", profile: { real_name: "Abdullah Almanie", display_name: "Abdullah", email: "a.manie@x.com", title: "Lead" } },
+        { id: "U0ALICE001", name: "alice", profile: { real_name: "Alice Haddad", display_name: "Alice", email: "a.haddad@x.com", title: "Lead" } },
         { id: "U0BOBBY001", name: "bobby", profile: { real_name: "Bobby Nasser", display_name: "Bobby", email: "b.smith@x.com" } },
         { id: "U0DELETED1", name: "gone", deleted: true, profile: { real_name: "Bobby Old" } },
       ];
@@ -37,9 +37,9 @@ describe("slack tools", () => {
         if (method === "users.list") return ok({ members: users });
         if (method === "conversations.list") return ok({ channels: Object.values(chans) });
         if (method === "conversations.info") return ok({ channel: chans[body.channel] });
-        if (method === "conversations.members") return ok({ members: body.channel === "G0PRIV0001" ? ["U0ABDULLAH"] : ["U0ABDULLAH", "U0BOBBY001"] });
+        if (method === "conversations.members") return ok({ members: body.channel === "G0PRIV0001" ? ["U0ALICE001"] : ["U0ALICE001", "U0BOBBY001"] });
         if (method === "conversations.open") return ok({ channel: { id: "D0BOBBY001" } });
-        if (method === "conversations.history") return ok({ messages: [{ ts: "1.0", user: "U0ABDULLAH", text: "hi" }] });
+        if (method === "conversations.history") return ok({ messages: [{ ts: "1.0", user: "U0ALICE001", text: "hi" }] });
         if (method === "chat.postMessage") return ok({ channel: body.channel, ts: "9.9" });
         if (method === "chat.update") return ok({});
         if (method === "assistant.search.context") return body.action_token === "act-1" ? ok({ results: { messages: [{ content: "deploy is green", permalink: "https://x/p1" }] } }) : new Response(JSON.stringify({ ok: false, error: "invalid_action_token" }));
@@ -54,27 +54,27 @@ describe("slack tools", () => {
       };
       const cfg = await import(${JSON.stringify(join(SRC, "config.ts"))}); await cfg.initConfig(); await cfg.loadSettings();
       const t = await import(${JSON.stringify(join(SRC, "slack-tools.ts"))});
-      const find = await t.runTool("slack_find_users", { query: "bobby" }, "U0ABDULLAH");
-      const byEmail = await t.runTool("slack_find_users", { query: "a.manie" }, "U0BOBBY001");
-      const privMember = await t.runTool("slack_read_messages", { channel: "G0PRIV0001" }, "U0ABDULLAH");
+      const find = await t.runTool("slack_find_users", { query: "bobby" }, "U0ALICE001");
+      const byEmail = await t.runTool("slack_find_users", { query: "a.haddad" }, "U0BOBBY001");
+      const privMember = await t.runTool("slack_read_messages", { channel: "G0PRIV0001" }, "U0ALICE001");
       const privOutsider = await t.runTool("slack_read_messages", { channel: "#secret" }, "U0BOBBY001");
-      const othersDm = await t.runTool("slack_read_messages", { channel: "D0BOBBY001" }, "U0ABDULLAH");
-      const postPublic = await t.runTool("slack_post_message", { channel: "#team", text: "PR ready <@U0BOBBY001>" }, "U0ABDULLAH");
-      t.startRunThread("C0PUB00001", "5.5", "U0ABDULLAH");
-      const postOwnThread = await t.runTool("slack_post_message", { channel: "#team", thread_ts: "5.5", text: "answer" }, "U0ABDULLAH");
-      const postOtherThread = await t.runTool("slack_post_message", { channel: "#team", thread_ts: "6.6", text: "fyi" }, "U0ABDULLAH");
-      await t.finishRunThread("C0PUB00001", "5.5", "U0ABDULLAH");
+      const othersDm = await t.runTool("slack_read_messages", { channel: "D0BOBBY001" }, "U0ALICE001");
+      const postPublic = await t.runTool("slack_post_message", { channel: "#team", text: "PR ready <@U0BOBBY001>" }, "U0ALICE001");
+      t.startRunThread("C0PUB00001", "5.5", "U0ALICE001");
+      const postOwnThread = await t.runTool("slack_post_message", { channel: "#team", thread_ts: "5.5", text: "answer" }, "U0ALICE001");
+      const postOtherThread = await t.runTool("slack_post_message", { channel: "#team", thread_ts: "6.6", text: "fyi" }, "U0ALICE001");
+      await t.finishRunThread("C0PUB00001", "5.5", "U0ALICE001");
       const postPrivOutsider = await t.runTool("slack_post_message", { channel: "G0PRIV0001", text: "x" }, "U0BOBBY001");
-      const dm = await t.runTool("slack_post_message", { channel: "<@U0BOBBY001>", text: "hey" }, "U0ABDULLAH");
+      const dm = await t.runTool("slack_post_message", { channel: "<@U0BOBBY001>", text: "hey" }, "U0ALICE001");
       const editOthers = await t.runTool("slack_update_message", { channel: "C0PUB00001", ts: "9.9", text: "y" }, "U0BOBBY001");
-      const editOwn = await t.runTool("slack_update_message", { channel: "C0PUB00001", ts: "9.9", text: "y" }, "U0ABDULLAH");
-      const upload = await t.runTool("slack_upload_file", { channel: "#team", filename: "report.csv", content_base64: Buffer.from("a,b").toString("base64"), comment: "here" }, "U0ABDULLAH");
+      const editOwn = await t.runTool("slack_update_message", { channel: "C0PUB00001", ts: "9.9", text: "y" }, "U0ALICE001");
+      const upload = await t.runTool("slack_upload_file", { channel: "#team", filename: "report.csv", content_base64: Buffer.from("a,b").toString("base64"), comment: "here" }, "U0ALICE001");
       const uploadPrivOutsider = await t.runTool("slack_upload_file", { channel: "G0PRIV0001", filename: "x.txt", content_base64: "eA==" }, "U0BOBBY001");
-      const downloadMember = await t.runTool("slack_download_file", { file_id: "F0PRIVFILE1" }, "U0ABDULLAH");
+      const downloadMember = await t.runTool("slack_download_file", { file_id: "F0PRIVFILE1" }, "U0ALICE001");
       const downloadOutsider = await t.runTool("slack_download_file", { file_id: "F0PRIVFILE1" }, "U0BOBBY001");
       const searchNoToken = await t.runTool("slack_search", { query: "deploy" }, "U0BOBBY001");
-      t.rememberActionToken("U0ABDULLAH", "act-1");
-      const search = await t.runTool("slack_search", { query: "deploy" }, "U0ABDULLAH");
+      t.rememberActionToken("U0ALICE001", "act-1");
+      const search = await t.runTool("slack_search", { query: "deploy" }, "U0ALICE001");
       console.log(JSON.stringify({
         searchNoToken: searchNoToken.ok,
         search: search.ok && search.result.results.messages[0].content,
@@ -104,7 +104,7 @@ describe("slack tools", () => {
       downloadMember: "abc",
       downloadOutsider: false,
       find: ["U0BOBBY001"],
-      byEmail: ["<@U0ABDULLAH>"],
+      byEmail: ["<@U0ALICE001>"],
       privMember: true,
       privOutsider: false,
       othersDm: false,

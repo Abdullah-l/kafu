@@ -5,6 +5,7 @@ import { isAllowed } from "../allowlist";
 import { extractErrorDetail } from "../messaging";
 import { loadPendingResume } from "../pending-resume";
 import { getSettings, loadSettings } from "../config";
+import { isolationEnabled } from "../isolation";
 import { transcribeAudioToText } from "../whisper";
 import { resetSession, resetFallbackSession, peekSession } from "../sessions";
 import { peekThreadSession, removeThreadSession } from "../sessionManager";
@@ -1716,6 +1717,10 @@ async function runPendingResumeTelegram(): Promise<void> {
 
 export function startPolling(debug = false): void {
   if (isPolling) return;
+  if (isolationEnabled()) {
+    console.error("[Telegram] Not started: Telegram runs have no per-person identity, so they would run as root while multi-user isolation is on.");
+    return;
+  }
   running = true;
   isPolling = true;
   telegramDebug = debug;

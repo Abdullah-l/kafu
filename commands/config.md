@@ -50,7 +50,7 @@ Toggle `agentic.enabled`. When on, prompts are routed by keyword to the models i
 
 ### `timezone <tz>`
 
-Set `timezone` (IANA name like `Asia/Riyadh`, or UTC offset like `UTC+3`). `timezoneOffsetMinutes` is resolved automatically.
+Set `timezone` (IANA name like `Europe/London`, or UTC offset like `UTC+3`). `timezoneOffsetMinutes` is resolved automatically.
 
 ### `security level <level>` / `security tools allow <tools>` / `security tools disallow <tools>`
 

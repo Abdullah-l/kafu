@@ -91,7 +91,8 @@ function cleanSpawnEnv(): Record<string, string> {
 
 async function identitySpawnEnv(identity: RunIdentity): Promise<Record<string, string>> {
   const env = cleanSpawnEnv();
-  for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "KAFU_SECRET_KEY", "KAFU_HANDOFF_SECRET", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "TELEGRAM_TOKEN"]) {
+  const forwardSecrets = getSettings().slack.forwardInteractions.map((rule) => rule.secretEnv);
+  for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "KAFU_SECRET_KEY", "KAFU_HANDOFF_SECRET", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "TELEGRAM_TOKEN", ...forwardSecrets]) {
     delete env[key];
   }
   if (isolationEnabled()) {

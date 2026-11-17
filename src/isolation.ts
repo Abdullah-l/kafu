@@ -359,6 +359,8 @@ export async function hardenWorkspace(): Promise<void> {
   await Promise.all(["CLAUDE.local.md", ".mcp.json"].map((n) => rm(join(PROJECT_DIR, n), { force: true })));
   await Promise.all(["CLAUDE.md", "CLAUDE.local.md", ".claude"].map((n) => rm(join(PROJECT_DIR, "agents", n), { recursive: true, force: true })));
   await rootOnly(KAFU_DIR, 0o711);
+  const settingsFile = join(KAFU_DIR, "settings.json");
+  if (existsSync(settingsFile) && lstatSync(settingsFile).isFile()) await rootOnly(settingsFile, 0o600);
   for (const entry of await readdir(KAFU_DIR)) {
     if (entry === "users" || entry === "settings.json") continue;
     await lockTree(join(KAFU_DIR, entry));

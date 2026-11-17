@@ -8,7 +8,7 @@ const SRC = join(import.meta.dir, "..");
 async function runInDir(script: string): Promise<any> {
   const dir = mkdtempSync(join(tmpdir(), "kafu-sched-"));
   mkdirSync(join(dir, ".claude", "kafu"), { recursive: true });
-  writeFileSync(join(dir, ".claude", "kafu", "settings.json"), JSON.stringify({ timezone: "Asia/Riyadh", slack: { botToken: "" } }));
+  writeFileSync(join(dir, ".claude", "kafu", "settings.json"), JSON.stringify({ timezone: "Europe/Istanbul", slack: { botToken: "" } }));
   const proc = Bun.spawn([process.execPath, "-e", script], { cwd: dir, stdout: "pipe", stderr: "pipe" });
   const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
   await proc.exited;
@@ -21,16 +21,16 @@ describe("schedules", () => {
     const r = await runInDir(`
       const cfg = await import(${JSON.stringify(join(SRC, "config.ts"))}); await cfg.loadSettings();
       const s = await import(${JSON.stringify(join(SRC, "schedules.ts"))});
-      const sundayNineRiyadh = new Date("2026-10-18T06:00:00Z");
-      const fridayNineRiyadh = new Date("2026-10-23T06:00:00Z");
+      const sundayNineLocal = new Date("2026-10-18T06:00:00Z");
+      const fridayNineLocal = new Date("2026-10-23T06:00:00Z");
       const tryCreate = async (cron) => { try { await s.createSchedule("U1", { name: "x", cron, prompt: "p", channel: "C1" }); return "ok"; } catch (e) { return e.message; } };
       console.log(JSON.stringify({
-        workweekSunday: s.cronMatches("0 9 * * 0-4", sundayNineRiyadh),
-        workweekFriday: s.cronMatches("0 9 * * 0-4", fridayNineRiyadh),
+        workweekSunday: s.cronMatches("0 9 * * 0-4", sundayNineLocal),
+        workweekFriday: s.cronMatches("0 9 * * 0-4", fridayNineLocal),
         utcNineIsNot: s.cronMatches("0 9 * * *", new Date("2026-10-18T09:00:00Z")),
-        sundayAs7: s.cronMatches("0 9 * * 7", sundayNineRiyadh),
+        sundayAs7: s.cronMatches("0 9 * * 7", sundayNineLocal),
         steps: s.cronMatches("*/15 * * * *", new Date("2026-10-18T06:45:00Z")),
-        dayOrWeekday: s.cronMatches("0 9 1 * 0", sundayNineRiyadh),
+        dayOrWeekday: s.cronMatches("0 9 1 * 0", sundayNineLocal),
         next: s.nextRuns("0 9 * * 0-4", 3, new Date("2026-10-22T07:00:00Z")).map((d) => d.toISOString()),
         bad: (() => { try { s.parseCron("61 * * * *"); return "parsed"; } catch (e) { return "rejected"; } })(),
         tooOften: await tryCreate("*/5 * * * *"),

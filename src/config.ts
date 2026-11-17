@@ -1,5 +1,5 @@
 import { join, isAbsolute } from "path";
-import { mkdir } from "fs/promises";
+import { mkdir, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import { normalizeTimezoneName, resolveTimezoneOffsetMinutes } from "./timezone";
 import { parseWatchdogConfig, type WatchdogConfig } from "./watchdog";
@@ -323,7 +323,7 @@ export async function initConfig(): Promise<void> {
   await mkdir(LOGS_DIR, { recursive: true });
 
   if (!existsSync(SETTINGS_FILE)) {
-    await Bun.write(SETTINGS_FILE, JSON.stringify(DEFAULT_SETTINGS, null, 2) + "\n");
+    await writeFile(SETTINGS_FILE, JSON.stringify(DEFAULT_SETTINGS, null, 2) + "\n", { mode: 0o600 });
   }
 }
 

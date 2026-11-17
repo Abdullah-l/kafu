@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decide, type GuardInput } from "../guard";
@@ -9,7 +9,11 @@ const root = mkdtempSync(join(tmpdir(), "kafu-guard-"));
 const work = join(root, "agents", "slack-c1-u1-1700000000.000100");
 const protectedCheckout = join(work, "agent-config");
 const normalCheckout = join(work, "acme-api");
-for (const d of [protectedCheckout, normalCheckout]) mkdirSync(d, { recursive: true });
+const tmp = join(root, "users", "U1", "tmp");
+const tmpCheckout = join(tmp, "acme-api");
+for (const d of [protectedCheckout, normalCheckout, join(tmpCheckout, ".git"), join(root, "users", "U1", "home", ".claude")]) mkdirSync(d, { recursive: true });
+symlinkSync(work, join(tmpCheckout, "thread"));
+symlinkSync(join(root, "users", "U1", "home"), join(tmpCheckout, "home"));
 
 const remotes: Record<string, string[]> = {
   [protectedCheckout]: ["remote.origin.url https://github.com/acme/agent-config.git"],
@@ -20,7 +24,7 @@ const branches: Record<string, string> = { [normalCheckout]: "ABC-1270" };
 
 const ctx = {
   repos,
-  env: { CLAUDE_CONFIG_DIR: join(root, "users", "U1", "claude"), HOME: join(root, "users", "U1", "home"), KAFU_WORKDIR: work },
+  env: { CLAUDE_CONFIG_DIR: join(root, "users", "U1", "claude"), HOME: join(root, "users", "U1", "home"), KAFU_WORKDIR: work, TMPDIR: tmp },
   remotesOf: (dir: string) => remotes[dir] ?? [],
   currentBranch: (dir: string) => branches[dir] ?? "",
 };
@@ -79,6 +83,34 @@ describe("guard: instruction files", () => {
     expect(bash("cat CLAUDE.md")).toBeNull();
     expect(bash("bundle exec rspec > /tmp/out.txt")).toBeNull();
   });
+
+  test("allows a repo's CLAUDE.md in a checkout under the temp folder", () => {
+    expect(write(join(tmpCheckout, "CLAUDE.md"), "Edit")).toBeNull();
+    expect(write(join(tmpCheckout, "docs", "CLAUDE.md"))).toBeNull();
+  });
+
+  test("blocks CLAUDE.md in the temp folder outside a checkout, and through symlinks", () => {
+    expect(write(join(tmp, "CLAUDE.md"))).not.toBeNull();
+    expect(write(join(tmpCheckout, "thread", "CLAUDE.md"))).not.toBeNull();
+    expect(write(join(tmpCheckout, "thread", ".claude", "settings.json"))).not.toBeNull();
+    expect(write(join(tmpCheckout, "home", ".claude", "CLAUDE.md"))).not.toBeNull();
+    expect(write(join(root, "agents", "other-thread", "CLAUDE.md"))).not.toBeNull();
+  });
+
+  test("allows committing and opening PRs that mention instruction files", () => {
+    expect(bash('git add CLAUDE.md && git commit -m "ABC-1: Update CLAUDE.md" 2>&1')).toBeNull();
+    expect(bash('gh pr create --title "ABC-1: Tell the bot to write tests in CLAUDE.md" --body "ABC-1" 2>&1')).toBeNull();
+    expect(bash("git commit -m \"$(cat <<'EOF'\nABC-1: Install hooks from .claude settings\nEOF\n)\" > /dev/null")).toBeNull();
+  });
+
+  test("still blocks writes hidden next to commit messages", () => {
+    expect(bash('git commit -m "$(echo x > CLAUDE.md)"')).not.toBeNull();
+    expect(bash("git commit -m 'x' && echo y > CLAUDE.md 2>&1")).not.toBeNull();
+    expect(bash("cp -t '.claude' evil.json")).not.toBeNull();
+    expect(bash("bash <<'EOF'\necho x > CLAUDE.md\nEOF")).not.toBeNull();
+    expect(bash("echo x > /dev/null/../../CLAUDE.md")).not.toBeNull();
+    expect(bash("git commit -m \"$(cat <<EOF\n$(cp evil.md CLAUDE.md)\nEOF\n)\"")).not.toBeNull();
+  });
 });
 
 describe("guard: GitHub policy", () => {
@@ -126,6 +158,22 @@ describe("guard: GitHub policy", () => {
     expect(bash("gh api repos/acme/acme-api/pulls?state=open | jq length")).toBeNull();
     expect(bash("gh api graphql -f query='query { viewer { login } }'")).toBeNull();
     expect(bash("gh run view 123 --log-failed")).toBeNull();
+  });
+});
+
+describe("guard: quoted commands", () => {
+  test("sees through quotes and escapes", () => {
+    expect(bash("git push origin ma''in", normalCheckout)).not.toBeNull();
+    expect(bash('git push origin "$(echo main)"', normalCheckout)).not.toBeNull();
+    expect(bash("gh pr mer''ge 5")).not.toBeNull();
+    expect(bash("cd agent-config && g''it pu''sh origin feature")).not.toBeNull();
+    expect(bash("git push origin m\\ain", normalCheckout)).not.toBeNull();
+  });
+
+  test("still allows normal pushes and messages that mention pushing", () => {
+    expect(bash("git push -u origin ABC-1270", normalCheckout)).toBeNull();
+    expect(bash('git commit -m "ABC-1270: Don\'t push on retries"', normalCheckout)).toBeNull();
+    expect(bash("git -C . push origin HEAD", normalCheckout)).toBeNull();
   });
 });
 

@@ -81,9 +81,9 @@ describe("extractReactionDirective", () => {
 
 describe("parseSlackLinks", () => {
   test("reads channel, message and thread from permalinks", () => {
-    const text = "check <https://acme.slack.com/archives/C09KCH37Z7C/p1791814443964939|this> and https://acme.slack.com/archives/C0AB/p1791814500000100?thread_ts=1791814443.964939&cid=C0AB";
+    const text = "check <https://acme.slack.com/archives/C0LINKED01/p1791814443964939|this> and https://acme.slack.com/archives/C0AB/p1791814500000100?thread_ts=1791814443.964939&cid=C0AB";
     expect(parseSlackLinks(text)).toEqual([
-      { url: "https://acme.slack.com/archives/C09KCH37Z7C/p1791814443964939", channelId: "C09KCH37Z7C", ts: "1791814443.964939", threadTs: "1791814443.964939" },
+      { url: "https://acme.slack.com/archives/C0LINKED01/p1791814443964939", channelId: "C0LINKED01", ts: "1791814443.964939", threadTs: "1791814443.964939" },
       { url: "https://acme.slack.com/archives/C0AB/p1791814500000100?thread_ts=1791814443.964939&cid=C0AB", channelId: "C0AB", ts: "1791814500.000100", threadTs: "1791814443.964939" },
     ]);
   });
