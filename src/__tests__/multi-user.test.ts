@@ -366,3 +366,24 @@ describe("temporary file cleanup", () => {
     });
   });
 });
+
+describe("skills folder setting", () => {
+  test("keeps an absolute skillsDir and drops a relative one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kafu-skills-"));
+    try {
+      const read = async (skillsDir: unknown) => {
+        await Bun.write(join(dir, ".claude/kafu/settings.json"), JSON.stringify({ multiUser: { enabled: true, skillsDir } }));
+        return runInDir(dir, `
+          const c = await import(${JSON.stringify(join(SRC, "config.ts"))});
+          await c.loadSettings();
+          console.log(JSON.stringify(c.getSettings().multiUser.skillsDir));
+        `);
+      };
+      expect(JSON.parse(await read(" /opt/team/skills "))).toBe("/opt/team/skills");
+      expect(JSON.parse(await read("team/skills"))).toBe("");
+      expect(JSON.parse(await read(42))).toBe("");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

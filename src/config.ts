@@ -61,7 +61,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
   slack: { botToken: "", appToken: "", allowedUserIds: [], allowGuests: false, listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, allowedPrivateChannels: [], watchChannels: [], handoff: null, acceptHandoffsFrom: [], forwardInteractions: [] },
-  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], tempFileTtlDays: 14, sharedCache: null, sharedAccount: { enabled: false, admins: [] }, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
+  multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], skillsDir: "", tempFileTtlDays: 14, sharedCache: null, sharedAccount: { enabled: false, admins: [] }, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
@@ -234,6 +234,7 @@ export interface MultiUserConfig {
   directMessages: boolean;
   portal: PortalConfig;
   protectedRepos: string[];
+  skillsDir: string;
   tempFileTtlDays: number;
   sharedCache: SharedCacheConfig | null;
   sharedAccount: SharedAccountConfig;
@@ -439,6 +440,7 @@ function parseSettings(raw: Record<string, any>): Settings {
         enabled: raw.multiUser?.sharedAccount?.enabled === true,
         admins: Array.isArray(raw.multiUser?.sharedAccount?.admins) ? raw.multiUser.sharedAccount.admins.filter((a: unknown): a is string => typeof a === "string" && /^[UW][A-Z0-9]+$/.test(a)) : [],
       },
+      skillsDir: typeof raw.multiUser?.skillsDir === "string" && isAbsolute(raw.multiUser.skillsDir.trim()) ? raw.multiUser.skillsDir.trim() : "",
       tempFileTtlDays: Number.isFinite(raw.multiUser?.tempFileTtlDays) && Number(raw.multiUser.tempFileTtlDays) > 0 ? Number(raw.multiUser.tempFileTtlDays) : 14,
       protectedRepos: Array.isArray(raw.multiUser?.protectedRepos)
         ? raw.multiUser.protectedRepos.filter((r: unknown): r is string => typeof r === "string" && /^[\w.-]+\/[\w.-]+$/.test(r.trim())).map((r: string) => r.trim())

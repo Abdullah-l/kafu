@@ -89,6 +89,7 @@ Everyone's requests run on the server, each with their own Claude config folder,
 - Run kafu as root (in a container) and each person's server runs get their own OS user (`setpriv`, no capabilities, `no_new_privs`), with private config, home and work folders. Runs can't read each other's files, transcripts or process environments, and can't touch kafu's own state. As a normal user, everyone's runs share that one user.
 - On start, kafu as root locks the workspace: the workspace root, `agents/`, `.claude/` and top-level symlinks (like a shared `CLAUDE.md`) become root-owned, and stray `CLAUDE.md`/`.claude` files in shared spots are removed. Before every run it strips instruction files (`CLAUDE.md`, `rules`, `skills`, `settings.json`, auto memory…) from that person's config, home and work folders, so nobody can plant instructions for later runs.
 - `multiUser.protectedRepos` (e.g. `["owner/kafu"]`): a root-owned managed-settings hook (`/etc/claude-code/managed-settings.json`, `allowManagedHooksOnly`) blocks pushes, PRs and GitHub calls for those repos, including from inside a checkout of them, and blocks edits to instruction files.
+- `multiUser.skillsDir` (e.g. `"/opt/team/skills"`): an absolute path to a folder of skills that every run loads. Isolation clears `.claude` in the workspace on start, then links this folder back in as `.claude/skills`, root-owned. Point it at a read-only location.
 
 ### Slack settings for teams
 

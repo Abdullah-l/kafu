@@ -349,6 +349,8 @@ export async function hardenWorkspace(): Promise<void> {
   await mkdir(join(PROJECT_DIR, ".claude"), { recursive: true });
   await rootOnly(join(PROJECT_DIR, ".claude"), 0o711);
   await stripMemory(join(PROJECT_DIR, ".claude"));
+  const skillsDir = getSettings().multiUser.skillsDir;
+  if (skillsDir) await rootSymlink(join(PROJECT_DIR, ".claude", "skills"), skillsDir);
   await mkdir(join(PROJECT_DIR, "agents"), { recursive: true });
   await rootOnly(join(PROJECT_DIR, "agents"), 0o711);
   for (const entry of await readdir(join(PROJECT_DIR, "agents"))) {
