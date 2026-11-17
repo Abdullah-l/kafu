@@ -60,7 +60,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezone: "UTC",
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
-  slack: { botToken: "", appToken: "", allowedUserIds: [], allowGuests: false, listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, allowedPrivateChannels: [], watchChannels: [], handoff: null, acceptHandoffsFrom: [] },
+  slack: { botToken: "", appToken: "", allowedUserIds: [], allowGuests: false, listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, allowedPrivateChannels: [], watchChannels: [], handoff: null, acceptHandoffsFrom: [], forwardInteractions: [] },
   multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], tempFileTtlDays: 14, sharedCache: null, sharedAccount: { enabled: false, admins: [] }, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
@@ -95,6 +95,27 @@ export interface SlackConfig {
   watchChannels: WatchChannel[];
   handoff: HandoffConfig | null;
   acceptHandoffsFrom: string[];
+  forwardInteractions: ForwardInteractionConfig[];
+}
+
+export interface ForwardInteractionConfig {
+  prefix: string;
+  url: string;
+  secretEnv: string;
+}
+
+export function parseForwardInteractions(value: unknown): ForwardInteractionConfig[] {
+  if (!Array.isArray(value)) return [];
+  const out: ForwardInteractionConfig[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const { prefix, url, secretEnv } = entry as Record<string, unknown>;
+    if (typeof prefix !== "string" || !/^[a-z][a-z0-9]*_$/.test(prefix)) continue;
+    if (typeof url !== "string" || !/^https?:\/\//.test(url) || !URL.canParse(url)) continue;
+    if (typeof secretEnv !== "string" || !/^[A-Z][A-Z0-9_]*$/.test(secretEnv)) continue;
+    out.push({ prefix, url, secretEnv });
+  }
+  return out;
 }
 
 export interface HandoffConfig {
@@ -406,6 +427,7 @@ function parseSettings(raw: Record<string, any>): Settings {
         ? { target: raw.slack.handoff.target, message: raw.slack.handoff.message.trim(), label: typeof raw.slack.handoff.label === "string" && raw.slack.handoff.label.trim() ? raw.slack.handoff.label.trim().slice(0, 30) : "Hand off" }
         : null,
       acceptHandoffsFrom: Array.isArray(raw.slack?.acceptHandoffsFrom) ? raw.slack.acceptHandoffsFrom.filter((b: unknown): b is string => typeof b === "string" && /^B[A-Z0-9]+$/.test(b)) : [],
+      forwardInteractions: parseForwardInteractions(raw.slack?.forwardInteractions),
     },
     multiUser: {
       enabled: raw.multiUser?.enabled === true,

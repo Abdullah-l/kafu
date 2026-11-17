@@ -26,6 +26,7 @@ import { mkdir, realpath, rename } from "node:fs/promises";
 import { dirname, extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { fetchWithTimeout } from "../http";
+import { matchForward, dispatchForwardedInteraction } from "../interaction-forward";
 
 const SLACK_DIRECTIVES_PATH = join(import.meta.dir, "..", "..", "prompts", "slack", "DIRECTIVES.md");
 let slackDirectivesPrompt: string | null = null;
@@ -2438,6 +2439,13 @@ async function handleSocketPayload(
 
   if (type === "interactive" && data.payload) {
     const interactivePayload = data.payload as any;
+    const forward = matchForward(interactivePayload, getSettings().slack.forwardInteractions);
+    if (forward) {
+      await dispatchForwardedInteraction(forward, interactivePayload, (body) => {
+        if (data.accepts_response_payload) sendAck(data.envelope_id!, body);
+      });
+      return;
+    }
     if (data.accepts_response_payload) {
       sendAck(data.envelope_id!);
     }
