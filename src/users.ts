@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile, chmod } from "node:fs/promises";
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 import { getSettings } from "./config";
+import { latestModel } from "./models";
 
 const KAFU_DIR = join(process.cwd(), ".claude", "kafu");
 const USERS_DIR = join(KAFU_DIR, "users");
@@ -217,5 +218,5 @@ export async function getRunIdentity(userId: string): Promise<RunIdentity | null
   const configDir = userConfigDir(userId);
   await mkdir(configDir, { recursive: true, mode: 0o700 });
   await chmod(userDir(userId), 0o700).catch(() => {});
-  return { userId, token: account.token, configDir, model: account.model, secrets: user?.secrets ?? {} };
+  return { userId, token: account.token, configDir, model: latestModel(account.model ?? ""), secrets: user?.secrets ?? {} };
 }

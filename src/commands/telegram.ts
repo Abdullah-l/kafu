@@ -1,5 +1,5 @@
 import { ensureProjectClaudeMd, run, runUserMessage, runFork, killActive, isMainBusy, compactCurrentSession, compactCurrentThreadSession, isRateLimited, getRateLimitResetAt, getPermissionMode, setPermissionMode, type PermissionMode } from "../runner";
-import { MODELS, modelLabel } from "../models";
+import { MODELS, choiceLabel } from "../models";
 import { wrapUntrusted } from "../prompt-safety";
 import { isAllowed } from "../allowlist";
 import { extractErrorDetail } from "../messaging";
@@ -1107,7 +1107,7 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
     const currentModel = chatModels.get(chatId);
     const defaultModel = getSettings().model || "default";
     const options = MODELS.map((m) => `• /${m.command} - ${m.label}: ${m.description}`).join("\n");
-    const current = currentModel ? modelLabel(currentModel) : `${defaultModel} (default)`;
+    const current = currentModel ? choiceLabel(currentModel) : `${defaultModel} (default)`;
     await sendMessage(config.token, chatId, `📊 Current model: **${current}**\n\nAvailable:\n${options}\n• /modeldefault - Use config default (${defaultModel})`, threadId);
     return;
   }

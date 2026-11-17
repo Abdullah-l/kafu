@@ -6,14 +6,29 @@ export interface ModelOption {
 }
 
 export const MODELS: ModelOption[] = [
-  { command: "modelfable", id: "claude-fable-5-1", label: "Fable 5.1", description: "Most capable" },
-  { command: "modelopus", id: "claude-opus-5-5", label: "Opus 5.5", description: "Deep reasoning" },
-  { command: "modelsonnet", id: "claude-sonnet-5-5", label: "Sonnet 5.5", description: "Balanced speed and capability" },
-  { command: "modelhaiku", id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", description: "Fastest" },
+  { command: "modelfable", id: "fable", label: "Fable", description: "Most capable" },
+  { command: "modelopus", id: "opus", label: "Opus", description: "Deep reasoning" },
+  { command: "modelsonnet", id: "sonnet", label: "Sonnet", description: "Balanced speed and capability" },
+  { command: "modelhaiku", id: "haiku", label: "Haiku", description: "Fastest" },
 ];
 
-export const FAST_MODEL = "claude-haiku-4-5-20251001";
+export const FAST_MODEL = "haiku";
+
+const FULL_ID = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/i;
+
+export function latestModel(id: string): string {
+  const family = id.trim().match(FULL_ID)?.[1]?.toLowerCase();
+  return family && MODELS.some((m) => m.id === family) ? family : id;
+}
 
 export function modelLabel(id: string): string {
-  return MODELS.find((m) => m.id === id)?.label ?? id;
+  const option = MODELS.find((m) => m.id === id.trim());
+  if (option) return `${option.label} (latest)`;
+  const full = id.trim().match(FULL_ID);
+  if (!full) return id;
+  return `${full[1][0].toUpperCase()}${full[1].slice(1).toLowerCase()} ${full[2]}${full[3] ? `.${full[3]}` : ""}`;
+}
+
+export function choiceLabel(id: string): string {
+  return modelLabel(latestModel(id));
 }

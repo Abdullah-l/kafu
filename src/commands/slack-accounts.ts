@@ -2,7 +2,7 @@ import { CLAUDE_EXECUTABLE } from "../runner";
 import { getUser, saveUserToken, clearUserToken, setUserModel, userScratchDir, setUserSecret, clearUserSecret, sharedAccountEnabled, isAccountAdmin, claudeAccountOwner } from "../users";
 import { startGhDeviceLogin, cancelGhLogin } from "../gh-login";
 import { startLogin, submitLoginCode, cancelLogin, hasPendingLogin, pendingLoginUrl, looksLikeLoginCode } from "../login";
-import { MODELS, modelLabel } from "../models";
+import { MODELS, choiceLabel, modelLabel } from "../models";
 import { getSettings, type CredentialSpec } from "../config";
 import { changeModel } from "../accounts";
 import { portalLink } from "../portal/server";
@@ -63,7 +63,7 @@ async function handlePortalMode(userId: string, lower: string, respond: (text: s
   if (model) {
     if (!model[1]) {
       const user = await getUser(claudeAccountOwner(userId));
-      await respond(`${sharedAccountEnabled() ? "Model" : "Your model"}: ${user?.model ? modelLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`}\n\nChange it with \`model <name>\`:\n${modelList()}\n• \`default\` — use the bot default`);
+      await respond(`${sharedAccountEnabled() ? "Model" : "Your model"}: ${user?.model ? choiceLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`}\n\nChange it with \`model <name>\`:\n${modelList()}\n• \`default\` — use the bot default`);
       return true;
     }
     const result = await changeModel(userId, model[1]);
@@ -289,7 +289,7 @@ export async function handleAccountMessage(
 
   if (lower === "whoami" || lower === "account") {
     const user = await getUser(userId);
-    const model = user?.model ? modelLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`;
+    const model = user?.model ? choiceLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`;
     const claude = user?.token
       ? `Claude: connected with your own account. Model: ${model}.`
       : "Claude: not connected. Send `login` to connect your Claude account.";
@@ -335,7 +335,7 @@ export async function handleAccountMessage(
   if (word === "model" && trimmed.split(/\s+/).length <= 2) {
     const user = await getUser(userId);
     if (!arg) {
-      const current = user?.model ? modelLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`;
+      const current = user?.model ? choiceLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`;
       await respond(`Your model: ${current}\n\nChange it with \`model <name>\`:\n${modelList()}\n• \`default\` — use the bot default`);
       return true;
     }

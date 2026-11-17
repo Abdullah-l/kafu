@@ -2,7 +2,7 @@ import { CLAUDE_EXECUTABLE } from "./runner";
 import { getUser, saveUserToken, clearUserToken, setUserModel, userScratchDir, setUserSecret, clearUserSecret, claudeAccountOwner, sharedAccountEnabled, isAccountAdmin } from "./users";
 import { startGhDeviceLogin, startAppDeviceLogin, cancelGhLogin } from "./gh-login";
 import { startLogin, submitLoginCode, cancelLogin, pendingLoginUrl } from "./login";
-import { MODELS, modelLabel } from "./models";
+import { MODELS, choiceLabel, latestModel } from "./models";
 import { getSettings, type CredentialSpec } from "./config";
 
 export interface DeviceState {
@@ -77,8 +77,8 @@ export async function accountStatus(userId: string): Promise<AccountStatus> {
     userId,
     claude: {
       connected: !!account?.token,
-      model: account?.model ?? "",
-      modelLabel: account?.model ? modelLabel(account.model) : `${defaultModel} (default)`,
+      model: latestModel(account?.model ?? ""),
+      modelLabel: account?.model ? choiceLabel(account.model) : `${defaultModel} (default)`,
       signInUrl: account?.token || !canManage ? null : pendingLoginUrl(claudeLoginKey(userId)),
       shared,
       canManage,
