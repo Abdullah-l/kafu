@@ -62,7 +62,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezone: "UTC",
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
-  slack: { botToken: "", appToken: "", allowedUserIds: [], allowGuests: false, listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, allowedPrivateChannels: [], watchChannels: [], handoff: null, acceptHandoffsFrom: [], forwardInteractions: [] },
+  slack: { botToken: "", appToken: "", allowedUserIds: [], allowGuests: false, listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, allowedPrivateChannels: [], watchChannels: [], handoff: null, acceptHandoffsFrom: [], forwardInteractions: [], nudge: null },
   multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], skillsDir: "", tempFileTtlDays: 14, sharedCache: null, sharedAccount: { enabled: false, admins: [] }, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
@@ -98,6 +98,24 @@ export interface SlackConfig {
   handoff: HandoffConfig | null;
   acceptHandoffsFrom: string[];
   forwardInteractions: ForwardInteractionConfig[];
+  nudge: NudgeConfig | null;
+}
+
+export interface NudgeConfig {
+  label: string;
+  message: string;
+  reaction: string;
+}
+
+export function parseNudge(value: unknown): NudgeConfig | null {
+  if (!value || typeof value !== "object") return null;
+  const { label, message, reaction } = value as Record<string, unknown>;
+  if (typeof label !== "string" || !label.trim() || typeof message !== "string" || !message.trim()) return null;
+  return {
+    label: label.trim().slice(0, 30),
+    message: message.trim().slice(0, 200),
+    reaction: typeof reaction === "string" && /^:?[a-z0-9_+'-]+:?$/i.test(reaction.trim()) ? reaction.trim().replace(/:/g, "") : "",
+  };
 }
 
 export interface ForwardInteractionConfig {
@@ -433,6 +451,7 @@ function parseSettings(raw: Record<string, any>): Settings {
         : null,
       acceptHandoffsFrom: Array.isArray(raw.slack?.acceptHandoffsFrom) ? raw.slack.acceptHandoffsFrom.filter((b: unknown): b is string => typeof b === "string" && /^B[A-Z0-9]+$/.test(b)) : [],
       forwardInteractions: parseForwardInteractions(raw.slack?.forwardInteractions),
+      nudge: parseNudge(raw.slack?.nudge),
     },
     multiUser: {
       enabled: raw.multiUser?.enabled === true,

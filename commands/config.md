@@ -100,6 +100,7 @@ Ask for confirmation with **AskUserQuestion**, then write the defaults:
 | `slack.listenChannels` | string[] | Channels answered without an @mention |
 | `slack.allowBots` | string[] | Channels where other bots' messages are passed through |
 | `slack.forwardInteractions` | object[] | `{ prefix, url, secretEnv }`: send matching buttons/modals to another service (see below) |
+| `slack.nudge` | object \| null | `{ label, message, reaction }`: adds a button next to Stop on the progress message. Clicking it posts `message` in the thread, adds the `reaction` emoji to the progress message, and the bot replies with how long it has been running and its current step |
 | `multiUser.enabled` | boolean | Each Slack user signs in with their own Claude account (DM `login`) |
 | `multiUser.mcpConfig` | string | Shared MCP config for all users (default `.mcp.json`) |
 | `telegram.token` | string | Bot token from @BotFather |

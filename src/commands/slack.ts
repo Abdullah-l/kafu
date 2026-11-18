@@ -365,6 +365,21 @@ const PROGRESS_MAX_LINES = 12;
 const PROGRESS_LINE_MAX = 88;
 
 const STOP_ACTION_ID = "cc_stop";
+const NUDGE_ACTION_ID = "cc_nudge";
+
+interface LiveRun {
+  activity: string[];
+  startedAt: number;
+}
+
+const liveRuns = new Map<string, LiveRun>();
+
+export function nudgeReply(run: LiveRun, now = Date.now()): string {
+  const steps = run.activity.filter((l) => l.startsWith("●"));
+  const current = steps.at(-1)?.replace(/^●\s*/, "");
+  const count = `${steps.length} step${steps.length === 1 ? "" : "s"}`;
+  return `Ow! Still on it, ${formatElapsed(now - run.startedAt)} in and ${count} so far.${current ? ` Right now: \`${current.replace(/`/g, "'")}\`` : " Still thinking it through."}`;
+}
 
 export function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -409,9 +424,15 @@ function progressBlocks(header: string, activity: string[], cancelKey: string, s
           value: cancelKey,
           style: "danger",
         },
+        ...nudgeButton(cancelKey),
       ],
     },
   ];
+}
+
+function nudgeButton(cancelKey: string): Record<string, unknown>[] {
+  const nudge = getSettings().slack.nudge;
+  return nudge ? [{ type: "button", text: { type: "plain_text", text: nudge.label, emoji: true }, action_id: NUDGE_ACTION_ID, value: cancelKey }] : [];
 }
 
 async function postBlocks(
@@ -1775,6 +1796,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
     const activity: string[] = [];
     const startedAt = Date.now();
     const runMeta: RunMeta = {};
+    liveRuns.set(cancelKey, { activity, startedAt });
     const postUsername = await postAsRequester(config.botToken, actingUserId);
     const stream = userId && botTeamId
       ? await TaskStream.start({ token: config.botToken, channel: channelId, threadTs: replyThreadTs, recipientUserId: userId, recipientTeamId: (event as { team?: string }).team ?? botTeamId, title: "Working on it", username: postUsername })
@@ -1838,6 +1860,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       clearInterval(statusRefreshInterval);
       if (progressTimer) clearInterval(progressTimer);
       stopMetaWatch();
+      liveRuns.delete(cancelKey);
       if (progressTs) await updateInflight((runs) => runs.filter((r) => r.progressTs !== progressTs));
     }
 
@@ -2168,6 +2191,19 @@ async function handleBlockAction(payload: any): Promise<void> {
   if (actionId.startsWith(CONNECT_ACTION_PREFIX) && isMultiUser()) {
     const id = actionId.slice(CONNECT_ACTION_PREFIX.length);
     await handleAccountMessage(user.id, `connect ${id}`, true, accountIO(config.botToken, user.id, channelId, message?.thread_ts ?? message?.ts ?? "", message?.thread_ts));
+    return;
+  }
+
+  if (actionId === NUDGE_ACTION_ID) {
+    const live = liveRuns.get(action.value ?? "");
+    const threadTs = message?.thread_ts ?? message?.ts;
+    if (!config.nudge || !live) {
+      await slackApi(config.botToken, "chat.postEphemeral", { channel: channelId, user: user.id, text: "Already finished.", ...(message?.thread_ts ? { thread_ts: message.thread_ts } : {}) }).catch(() => {});
+      return;
+    }
+    if (config.nudge.reaction && message?.ts) await sendReaction(config.botToken, channelId, message.ts, config.nudge.reaction);
+    await sendMessage(config.botToken, channelId, `${config.nudge.reaction ? `:${config.nudge.reaction}: ` : ""}<@${user.id}>: ${config.nudge.message}`, threadTs).catch(() => {});
+    await sendMessage(config.botToken, channelId, nudgeReply(live), threadTs).catch(() => {});
     return;
   }
 

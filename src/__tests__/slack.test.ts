@@ -8,8 +8,10 @@ import {
   parseSlackLinks,
   formatElapsed,
   runStatusLine,
+  nudgeReply,
   markdownToMrkdwn,
 } from "../commands/slack";
+import { parseNudge } from "../config";
 
 describe("assistantKey", () => {
   test("same channel, different thread_ts are distinct keys", () => {
@@ -151,5 +153,21 @@ describe("context window", () => {
     expect(contextWindowFor("claude-opus-4-6")).toBe(200_000);
     expect(contextWindowFor("claude-haiku-4-5-20251001")).toBe(200_000);
     expect(contextWindowFor("", "")).toBe(200_000);
+  });
+});
+
+describe("nudge button", () => {
+  test("parses the nudge setting and drops bad ones", () => {
+    expect(parseNudge({ label: ":rocket: Hurry", message: "ARE WE THERE YET?", reaction: ":rocket:" })).toEqual({ label: ":rocket: Hurry", message: "ARE WE THERE YET?", reaction: "rocket" });
+    expect(parseNudge({ label: "Hurry", message: "Go", reaction: "not an emoji!" })?.reaction).toBe("");
+    expect(parseNudge({ label: "", message: "Go" })).toBeNull();
+    expect(parseNudge({ label: "Hurry" })).toBeNull();
+    expect(parseNudge(undefined)).toBeNull();
+  });
+
+  test("answers with the time, step count and current step", () => {
+    const run = { activity: ["● Read(src/app.ts)", "  ⎿ 40 lines", "● Bash(bun test)"], startedAt: 0 };
+    expect(nudgeReply(run, 125_000)).toBe("Ow! Still on it, 2m 05s in and 2 steps so far. Right now: `Bash(bun test)`");
+    expect(nudgeReply({ activity: [], startedAt: 0 }, 4_000)).toBe("Ow! Still on it, 4s in and 0 steps so far. Still thinking it through.");
   });
 });
