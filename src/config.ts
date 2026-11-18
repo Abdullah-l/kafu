@@ -105,20 +105,34 @@ export interface NudgeConfig {
   label: string;
   message: string;
   reaction: string;
-  cries: string[];
-  sound: string;
+  cries: string[][];
+  doneText: string;
+  prompt: string;
+  leaderboardChannel: string;
+  leaderboardTitle: string;
+}
+
+function cleanCry(c: unknown): string {
+  return typeof c === "string" ? c.trim().slice(0, 60) : "";
 }
 
 export function parseNudge(value: unknown): NudgeConfig | null {
   if (!value || typeof value !== "object") return null;
-  const { label, message, reaction, cries, sound } = value as Record<string, unknown>;
+  const { label, message, reaction, cries, doneText, prompt, leaderboardChannel, leaderboardTitle } = value as Record<string, unknown>;
   if (typeof label !== "string" || !label.trim() || typeof message !== "string" || !message.trim()) return null;
+  const list = Array.isArray(cries) ? cries : [];
+  const tiers = list.every((c) => typeof c === "string")
+    ? [list.map(cleanCry).filter(Boolean)]
+    : list.map((tier) => (Array.isArray(tier) ? tier : [tier]).map(cleanCry).filter(Boolean));
   return {
     label: label.trim().slice(0, 30),
     message: message.trim().slice(0, 200),
     reaction: typeof reaction === "string" && /^:?[a-z0-9_+'-]+:?$/i.test(reaction.trim()) ? reaction.trim().replace(/:/g, "") : "",
-    cries: Array.isArray(cries) ? cries.filter((c): c is string => typeof c === "string" && !!c.trim()).map((c) => c.trim().slice(0, 40)) : [],
-    sound: typeof sound === "string" && isAbsolute(sound.trim()) ? sound.trim() : "",
+    cries: tiers.filter((t) => t.length > 0),
+    doneText: typeof doneText === "string" && doneText.trim() ? doneText.trim().slice(0, 200) : "Already done!",
+    prompt: typeof prompt === "string" ? prompt.trim().slice(0, 1000) : "",
+    leaderboardChannel: typeof leaderboardChannel === "string" && /^[CG][A-Z0-9]{6,}$/.test(leaderboardChannel.trim()) ? leaderboardChannel.trim() : "",
+    leaderboardTitle: typeof leaderboardTitle === "string" && leaderboardTitle.trim() ? leaderboardTitle.trim().slice(0, 120) : "Top nudgers for {month}",
   };
 }
 

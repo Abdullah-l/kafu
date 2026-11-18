@@ -27,6 +27,7 @@ import { dirname, extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { fetchWithTimeout } from "../http";
 import { matchForward, dispatchForwardedInteraction } from "../interaction-forward";
+import { beginNudgeRun, endNudgeRun, nudgeRun, peekNudgeRun, recordWhip, whipMessage, buttonLabel, countBadge, nudgePrompt, takePendingNudges, countWhip, dueLeaderboard } from "../nudge";
 
 const SLACK_DIRECTIVES_PATH = join(import.meta.dir, "..", "..", "prompts", "slack", "DIRECTIVES.md");
 let slackDirectivesPrompt: string | null = null;
@@ -156,6 +157,8 @@ function isDuplicate(channelId: string, ts: string): boolean {
   recentlyProcessed.set(key, now);
   return false;
 }
+
+setInterval(() => { if (running) void announceLeaderboard(); }, 60 * 60_000);
 
 setInterval(() => {
   const now = Date.now();
@@ -367,23 +370,6 @@ const PROGRESS_LINE_MAX = 88;
 const STOP_ACTION_ID = "cc_stop";
 const NUDGE_ACTION_ID = "cc_nudge";
 
-interface LiveRun {
-  text: string;
-}
-
-const liveRuns = new Map<string, LiveRun>();
-
-export function currentNarration(text: string): string {
-  const line = text.split("\n").map((l) => l.trim()).filter(Boolean).at(-1) ?? "";
-  const plain = line.replace(/^[>#\s]+/, "").replace(/[`*]/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
-  return plain.length > 160 ? `${plain.slice(0, 157)}…` : plain;
-}
-
-export function nudgeReply(run: LiveRun, cries: string[], pick = Math.random): string {
-  const cry = cries.length ? cries[Math.floor(pick() * cries.length) % cries.length] : "";
-  return [cry, currentNarration(run.text) || "Still thinking."].filter(Boolean).join(" ");
-}
-
 export function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   if (s < 60) return `${s}s`;
@@ -435,7 +421,25 @@ function progressBlocks(header: string, activity: string[], cancelKey: string, s
 
 function nudgeButton(cancelKey: string): Record<string, unknown>[] {
   const nudge = getSettings().slack.nudge;
-  return nudge ? [{ type: "button", text: { type: "plain_text", text: nudge.label, emoji: true }, action_id: NUDGE_ACTION_ID, value: cancelKey }] : [];
+  return nudge ? [{ type: "button", text: { type: "plain_text", text: buttonLabel(nudge, peekNudgeRun(cancelKey)?.count ?? 0), emoji: true }, action_id: NUDGE_ACTION_ID, value: cancelKey }] : [];
+}
+
+async function announceLeaderboard(): Promise<void> {
+  const config = getSettings().slack;
+  if (!config.nudge?.leaderboardChannel) return;
+  const text = await dueLeaderboard(config.nudge).catch(() => null);
+  if (text) await postMessage(config.botToken, config.nudge.leaderboardChannel, text).catch(() => {});
+}
+
+function nudgeActions(cancelKey: string): Record<string, unknown>[] {
+  const button = nudgeButton(cancelKey);
+  return button.length ? [{ type: "actions", elements: button }] : [];
+}
+
+function withNudgeCount(footer: string, cancelKey: string): string {
+  const nudge = getSettings().slack.nudge;
+  const badge = nudge ? countBadge(nudge, peekNudgeRun(cancelKey)?.count ?? 0) : "";
+  return badge ? `${footer}   ${badge}` : footer;
 }
 
 async function postBlocks(
@@ -1134,12 +1138,11 @@ async function uploadFile(
   filePath: string,
   threadTs?: string,
   title?: string,
-  comment?: string,
 ): Promise<void> {
   const file = Bun.file(filePath);
   if (!(await file.exists())) {
     debugLog(`Upload failed: file not found: ${filePath}`);
-    throw new Error(`file not found: ${filePath}`);
+    return;
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -1173,7 +1176,6 @@ async function uploadFile(
     files: [fileObj],
     channel_id: channelId,
     ...(threadTs ? { thread_ts: threadTs } : {}),
-    ...(comment ? { initial_comment: comment } : {}),
   });
 
   console.log(`[Slack] File uploaded: ${filename} to ${channelId}`);
@@ -1787,9 +1789,14 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       promptParts.push("The user attached file(s), but downloading failed. Ask them to resend.");
     }
 
-    const prefixedPrompt = promptParts.join("\n");
-
     const cancelKey = actingUserId ? userThreadKey(channelId, replyThreadTs, actingUserId) : `slk:${channelId}:${replyThreadTs}`;
+    const heardNudges = config.nudge ? takePendingNudges(cancelKey) : null;
+    if (config.nudge && heardNudges) {
+      const line = nudgePrompt(config.nudge, heardNudges);
+      if (line) promptParts.push(line);
+    }
+
+    const prefixedPrompt = promptParts.join("\n");
 
     await setAssistantStatus(config.botToken, channelId, replyThreadTs, "Thinking...");
 
@@ -1802,8 +1809,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
     const activity: string[] = [];
     const startedAt = Date.now();
     const runMeta: RunMeta = {};
-    const live: LiveRun = { text: "" };
-    liveRuns.set(cancelKey, live);
+    const live = beginNudgeRun(cancelKey, channelId, replyThreadTs, () => { progressDirty = true; });
     const onChunk = (chunk: string) => {
       live.text = chunk === "\n" ? "" : (live.text + chunk).slice(-2000);
     };
@@ -1871,7 +1877,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       clearInterval(statusRefreshInterval);
       if (progressTimer) clearInterval(progressTimer);
       stopMetaWatch();
-      liveRuns.delete(cancelKey);
+      endNudgeRun(cancelKey);
       if (progressTs) await updateInflight((runs) => runs.filter((r) => r.progressTs !== progressTs));
     }
 
@@ -2051,7 +2057,15 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
         const steps = activity.filter((l) => l.startsWith("●")).length;
         doneFooter = `✓ Done${steps ? ` — ${steps} step${steps === 1 ? "" : "s"}` : ""}   ${runStatusLine(runMeta, Date.now() - startedAt)}`;
       }
-      const footerBlocks: Record<string, unknown>[] = doneFooter ? [{ type: "context", elements: [{ type: "mrkdwn", text: doneFooter }] }] : [];
+      const footerFor = (): Record<string, unknown>[] => doneFooter ? [{ type: "context", elements: [{ type: "mrkdwn", text: withNudgeCount(doneFooter, cancelKey) }] }, ...nudgeActions(cancelKey)] : [];
+      const footerBlocks = footerFor();
+      const keepWhippable = (ts: string) => {
+        if (!doneFooter || !config.nudge || !live.done) return;
+        live.rerender = async () => {
+          const blocks = answerBlocks(finalText, [...footerFor(), ...handoffBlocks]);
+          if (blocks) await slackApi(config.botToken, "chat.update", { channel: channelId, ts, text: finalText, blocks });
+        };
+      };
       const filesCarryAnswer = !!actingUserId && hasDeferredFiles(channelId, replyThreadTs, actingUserId)
         && !!finalText && !buttons && !select && !handoffBlocks.length && finalText.length <= 3500;
       if (filesCarryAnswer) {
@@ -2070,6 +2084,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
           debugLog(`answer-in-progress update failed: ${err instanceof Error ? err.message : err}`);
         });
         lastBotMessageTs.set(msgKey, progressTs);
+        keepWhippable(progressTs);
       } else {
         if (progressTs) {
           const steps = activity.filter((l) => l.startsWith("●")).length;
@@ -2087,6 +2102,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
             const blocks = finalText.length <= MESSAGE_TEXT_MAX ? answerBlocks(finalText, [...footerBlocks, ...handoffBlocks]) : null;
             if (blocks) {
               sentTs = await postBlocks(config.botToken, channelId, finalText, blocks, replyThreadTs);
+              if (sentTs) keepWhippable(sentTs);
             } else {
               for (let i = 0; i < finalText.length; i += MESSAGE_TEXT_MAX) {
                 const chunkTs = await postMessage(config.botToken, channelId, finalText.slice(i, i + MESSAGE_TEXT_MAX), replyThreadTs);
@@ -2206,17 +2222,22 @@ async function handleBlockAction(payload: any): Promise<void> {
   }
 
   if (actionId === NUDGE_ACTION_ID) {
-    const live = liveRuns.get(action.value ?? "");
-    const threadTs = message?.thread_ts ?? message?.ts;
-    if (!config.nudge || !live) {
-      await slackApi(config.botToken, "chat.postEphemeral", { channel: channelId, user: user.id, text: "Already finished.", ...(message?.thread_ts ? { thread_ts: message.thread_ts } : {}) }).catch(() => {});
-      return;
-    }
-    if (config.nudge.reaction && message?.ts) await sendReaction(config.botToken, channelId, message.ts, config.nudge.reaction);
-    const shout = `${config.nudge.reaction ? `:${config.nudge.reaction}: ` : ""}<@${user.id}>: ${config.nudge.message}`;
-    const sent = config.nudge.sound ? await uploadFile(config.botToken, channelId, config.nudge.sound, threadTs, undefined, shout).then(() => true, () => false) : false;
-    if (!sent) await sendMessage(config.botToken, channelId, shout, threadTs).catch(() => {});
-    await sendMessage(config.botToken, channelId, nudgeReply(live, config.nudge.cries), threadTs).catch(() => {});
+    const nudge = config.nudge;
+    const key = action.value ?? "";
+    const threadTs = message?.thread_ts ?? message?.ts ?? "";
+    if (!nudge || !key) return;
+    const run = nudgeRun(key, channelId, threadTs);
+    run.queue = run.queue.then(async () => {
+      recordWhip(run, user.id, nudge);
+      void countWhip(user.id);
+      if (nudge.reaction && message?.ts) void sendReaction(config.botToken, channelId, message.ts, nudge.reaction);
+      const text = whipMessage(run, nudge);
+      if (run.whipTs) await updateMessage(config.botToken, channelId, run.whipTs, text).catch(() => {});
+      else run.whipTs = await postMessage(config.botToken, channelId, text, run.threadTs || threadTs).catch(() => null);
+      run.onChange?.();
+      await run.rerender?.().catch(() => {});
+    }).catch((err) => debugLog(`nudge failed: ${err instanceof Error ? err.message : err}`));
+    void announceLeaderboard();
     return;
   }
 
@@ -2663,6 +2684,7 @@ export function startSlack(debug = false): void {
   (async () => {
     await ensureProjectClaudeMd();
     await mkdir(SLACK_OUTBOX_DIR, { recursive: true });
+    void announceLeaderboard();
 
     try {
       const authData = await slackApi<{ user_id: string; user: string; team_id?: string }>(

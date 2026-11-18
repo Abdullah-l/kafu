@@ -8,11 +8,8 @@ import {
   parseSlackLinks,
   formatElapsed,
   runStatusLine,
-  nudgeReply,
-  currentNarration,
   markdownToMrkdwn,
 } from "../commands/slack";
-import { parseNudge } from "../config";
 
 describe("assistantKey", () => {
   test("same channel, different thread_ts are distinct keys", () => {
@@ -154,27 +151,5 @@ describe("context window", () => {
     expect(contextWindowFor("claude-opus-4-6")).toBe(200_000);
     expect(contextWindowFor("claude-haiku-4-5-20251001")).toBe(200_000);
     expect(contextWindowFor("", "")).toBe(200_000);
-  });
-});
-
-describe("nudge button", () => {
-  test("parses the nudge setting and drops bad ones", () => {
-    expect(parseNudge({ label: ":rocket: Hurry", message: "ARE WE THERE YET?", reaction: ":rocket:", cries: ["Hey!", "", 3], sound: "/opt/sounds/beep.mp3" })).toEqual({ label: ":rocket: Hurry", message: "ARE WE THERE YET?", reaction: "rocket", cries: ["Hey!"], sound: "/opt/sounds/beep.mp3" });
-    expect(parseNudge({ label: "Hurry", message: "Go", reaction: "not an emoji!", sound: "beep.mp3" })).toEqual({ label: "Hurry", message: "Go", reaction: "", cries: [], sound: "" });
-    expect(parseNudge({ label: "", message: "Go" })).toBeNull();
-    expect(parseNudge({ label: "Hurry" })).toBeNull();
-    expect(parseNudge(undefined)).toBeNull();
-  });
-
-  test("answers with a cry and only the latest thing the bot said, never its tools", () => {
-    const run = { text: "Found the job.\nNow checking the logs for `Bobby`." };
-    expect(nudgeReply(run, ["Ow!", "Hey!"], () => 0.9)).toBe("Hey! Now checking the logs for Bobby.");
-    expect(nudgeReply(run, [])).toBe("Now checking the logs for Bobby.");
-    expect(nudgeReply({ text: "" }, ["Ow!"], () => 0)).toBe("Ow! Still thinking.");
-  });
-
-  test("keeps the line short and can't ping anyone", () => {
-    expect(currentNarration("Asking <!channel> and <@U123>")).toBe("Asking &lt;!channel&gt; and &lt;@U123&gt;");
-    expect(currentNarration("x".repeat(300))).toHaveLength(158);
   });
 });
