@@ -21,6 +21,7 @@ import {
   setNudgeFile,
   writeNudgeFile,
   NUDGE_HOOK_COMMAND,
+  nudgeAllowed,
 } from "../nudge";
 
 const cfg: NudgeConfig = parseNudge({
@@ -44,6 +45,14 @@ describe("nudge settings", () => {
     expect(plain).toMatchObject({ reaction: "", cries: [], doneText: "Already done!", prompt: "", leaderboardChannel: "" });
     expect(parseNudge({ label: "", message: "Go" })).toBeNull();
     expect(parseNudge(undefined)).toBeNull();
+  });
+
+  test("can be limited to some channels", () => {
+    const limited = parseNudge({ label: "Hurry", message: "Go", channels: ["C0123456789", "general", 5] })!;
+    expect(limited.channels).toEqual(["C0123456789"]);
+    expect(nudgeAllowed(limited, "C0123456789")).toBe(true);
+    expect(nudgeAllowed(limited, "C0999999999")).toBe(false);
+    expect(nudgeAllowed(cfg, "C0999999999")).toBe(true);
   });
 });
 

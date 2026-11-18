@@ -109,6 +109,7 @@ export interface NudgeConfig {
   doneText: string;
   prompt: string;
   livePrompt: string;
+  channels: string[];
   leaderboardChannel: string;
   leaderboardTitle: string;
 }
@@ -119,7 +120,7 @@ function cleanCry(c: unknown): string {
 
 export function parseNudge(value: unknown): NudgeConfig | null {
   if (!value || typeof value !== "object") return null;
-  const { label, message, reaction, cries, doneText, prompt, livePrompt, leaderboardChannel, leaderboardTitle } = value as Record<string, unknown>;
+  const { label, message, reaction, cries, doneText, prompt, livePrompt, channels, leaderboardChannel, leaderboardTitle } = value as Record<string, unknown>;
   if (typeof label !== "string" || !label.trim() || typeof message !== "string" || !message.trim()) return null;
   const list = Array.isArray(cries) ? cries : [];
   const tiers = list.every((c) => typeof c === "string")
@@ -133,6 +134,7 @@ export function parseNudge(value: unknown): NudgeConfig | null {
     doneText: typeof doneText === "string" && doneText.trim() ? doneText.trim().slice(0, 200) : "Already done!",
     prompt: typeof prompt === "string" ? prompt.trim().slice(0, 1000) : "",
     livePrompt: typeof livePrompt === "string" ? livePrompt.trim().slice(0, 1000) : "",
+    channels: Array.isArray(channels) ? channels.filter((c): c is string => typeof c === "string" && /^[CGD][A-Z0-9]{6,}$/.test(c.trim())).map((c) => c.trim()) : [],
     leaderboardChannel: typeof leaderboardChannel === "string" && /^[CG][A-Z0-9]{6,}$/.test(leaderboardChannel.trim()) ? leaderboardChannel.trim() : "",
     leaderboardTitle: typeof leaderboardTitle === "string" && leaderboardTitle.trim() ? leaderboardTitle.trim().slice(0, 120) : "Top nudgers for {month}",
   };

@@ -27,7 +27,7 @@ import { dirname, extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { fetchWithTimeout } from "../http";
 import { matchForward, dispatchForwardedInteraction } from "../interaction-forward";
-import { beginNudgeRun, endNudgeRun, nudgeRun, peekNudgeRun, recordWhip, writeNudgeFile, whipMessage, buttonLabel, countBadge, nudgePrompt, takePendingNudges, countWhip, dueLeaderboard } from "../nudge";
+import { beginNudgeRun, endNudgeRun, nudgeRun, peekNudgeRun, nudgeAllowed, recordWhip, writeNudgeFile, whipMessage, buttonLabel, countBadge, nudgePrompt, takePendingNudges, countWhip, dueLeaderboard } from "../nudge";
 
 const SLACK_DIRECTIVES_PATH = join(import.meta.dir, "..", "..", "prompts", "slack", "DIRECTIVES.md");
 let slackDirectivesPrompt: string | null = null;
@@ -421,7 +421,8 @@ function progressBlocks(header: string, activity: string[], cancelKey: string, s
 
 function nudgeButton(cancelKey: string): Record<string, unknown>[] {
   const nudge = getSettings().slack.nudge;
-  return nudge ? [{ type: "button", text: { type: "plain_text", text: buttonLabel(nudge, peekNudgeRun(cancelKey)?.count ?? 0), emoji: true }, action_id: NUDGE_ACTION_ID, value: cancelKey }] : [];
+  const run = peekNudgeRun(cancelKey);
+  return nudge && run && nudgeAllowed(nudge, run.channel) ? [{ type: "button", text: { type: "plain_text", text: buttonLabel(nudge, run.count), emoji: true }, action_id: NUDGE_ACTION_ID, value: cancelKey }] : [];
 }
 
 async function announceLeaderboard(): Promise<void> {
@@ -2226,6 +2227,10 @@ async function handleBlockAction(payload: any): Promise<void> {
     const key = action.value ?? "";
     const threadTs = message?.thread_ts ?? message?.ts ?? "";
     if (!nudge || !key) return;
+    if (!nudgeAllowed(nudge, channelId)) {
+      await slackApi(config.botToken, "chat.postEphemeral", { channel: channelId, user: user.id, text: `This button only works in ${nudge.channels.map((c) => `<#${c}>`).join(", ")}.`, ...(message?.thread_ts ? { thread_ts: message.thread_ts } : {}) }).catch(() => {});
+      return;
+    }
     const run = nudgeRun(key, channelId, threadTs);
     run.queue = run.queue.then(async () => {
       recordWhip(run, user.id, nudge);

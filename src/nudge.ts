@@ -100,6 +100,10 @@ export function takePendingNudges(key: string): { count: number; users: string[]
   return out;
 }
 
+export function nudgeAllowed(cfg: NudgeConfig, channel: string): boolean {
+  return cfg.channels.length === 0 || cfg.channels.includes(channel);
+}
+
 export function pickCry(tiers: string[][], count: number, pick = Math.random, previous = ""): string {
   if (!tiers.length) return "";
   const tier = tiers[Math.min(Math.max(count, 1), tiers.length) - 1];
