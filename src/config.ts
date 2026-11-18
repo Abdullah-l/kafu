@@ -62,7 +62,7 @@ const DEFAULT_SETTINGS: Settings = {
   timezone: "UTC",
   timezoneOffsetMinutes: 0,
   telegram: { token: "", allowedUserIds: [], listenChats: [], receiveEnabled: true, dmIsolation: "shared" },
-  slack: { botToken: "", appToken: "", allowedUserIds: [], allowGuests: false, listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, allowedPrivateChannels: [], watchChannels: [], handoff: null, acceptHandoffsFrom: [], forwardInteractions: [], nudge: null },
+  slack: { botToken: "", appToken: "", allowedUserIds: [], allowGuests: false, listenChannels: [], allowBots: [], allowBotIds: [], assistantStatus: false, publicChannelsOnly: false, allowedPrivateChannels: [], watchChannels: [], handoff: null, acceptHandoffsFrom: [], forwardInteractions: [], nudges: [] },
   multiUser: { enabled: false, mcpConfig: "", credentials: [], directMessages: true, protectedRepos: [], skillsDir: "", tempFileTtlDays: 14, sharedCache: null, sharedAccount: { enabled: false, admins: [] }, portal: { enabled: false, host: "0.0.0.0", port: 4650, publicUrl: "", title: "Connections", linkNote: "" } },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
@@ -98,10 +98,11 @@ export interface SlackConfig {
   handoff: HandoffConfig | null;
   acceptHandoffsFrom: string[];
   forwardInteractions: ForwardInteractionConfig[];
-  nudge: NudgeConfig | null;
+  nudges: NudgeConfig[];
 }
 
 export interface NudgeConfig {
+  id: string;
   label: string;
   message: string;
   reaction: string;
@@ -118,15 +119,26 @@ function cleanCry(c: unknown): string {
   return typeof c === "string" ? c.trim().slice(0, 60) : "";
 }
 
-export function parseNudge(value: unknown): NudgeConfig | null {
+export function parseNudges(list: unknown, single?: unknown): NudgeConfig[] {
+  const entries = Array.isArray(list) ? list : single ? [single] : [];
+  const out: NudgeConfig[] = [];
+  for (const entry of entries.slice(0, 4)) {
+    const nudge = parseNudge(entry, `nudge${out.length ? out.length + 1 : ""}`);
+    if (nudge && !out.some((n) => n.id === nudge.id)) out.push(nudge);
+  }
+  return out;
+}
+
+export function parseNudge(value: unknown, fallbackId = "nudge"): NudgeConfig | null {
   if (!value || typeof value !== "object") return null;
-  const { label, message, reaction, cries, doneText, prompt, livePrompt, channels, leaderboardChannel, leaderboardTitle } = value as Record<string, unknown>;
+  const { id, label, message, reaction, cries, doneText, prompt, livePrompt, channels, leaderboardChannel, leaderboardTitle } = value as Record<string, unknown>;
   if (typeof label !== "string" || !label.trim() || typeof message !== "string" || !message.trim()) return null;
   const list = Array.isArray(cries) ? cries : [];
   const tiers = list.every((c) => typeof c === "string")
     ? [list.map(cleanCry).filter(Boolean)]
     : list.map((tier) => (Array.isArray(tier) ? tier : [tier]).map(cleanCry).filter(Boolean));
   return {
+    id: typeof id === "string" && /^[a-z0-9]{1,20}$/.test(id.trim()) ? id.trim() : fallbackId,
     label: label.trim().slice(0, 30),
     message: message.trim().slice(0, 200),
     reaction: typeof reaction === "string" && /^:?[a-z0-9_+'-]+:?$/i.test(reaction.trim()) ? reaction.trim().replace(/:/g, "") : "",
@@ -473,7 +485,7 @@ function parseSettings(raw: Record<string, any>): Settings {
         : null,
       acceptHandoffsFrom: Array.isArray(raw.slack?.acceptHandoffsFrom) ? raw.slack.acceptHandoffsFrom.filter((b: unknown): b is string => typeof b === "string" && /^B[A-Z0-9]+$/.test(b)) : [],
       forwardInteractions: parseForwardInteractions(raw.slack?.forwardInteractions),
-      nudge: parseNudge(raw.slack?.nudge),
+      nudges: parseNudges(raw.slack?.nudges, raw.slack?.nudge),
     },
     multiUser: {
       enabled: raw.multiUser?.enabled === true,

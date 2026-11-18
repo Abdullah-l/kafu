@@ -2,18 +2,22 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { NudgeConfig } from "./config";
 
+export interface NudgeTally {
+  count: number;
+  users: string[];
+  cries: string[];
+  ts: string | null;
+  pending: number;
+  pendingUsers: string[];
+}
+
 export interface NudgeRun {
   key: string;
   channel: string;
   threadTs: string;
-  count: number;
-  users: string[];
-  cries: string[];
   text: string;
   done: boolean;
-  whipTs: string | null;
-  pending: number;
-  pendingUsers: string[];
+  tallies: Record<string, NudgeTally>;
   touched: number;
   onChange: (() => void) | null;
   rerender: (() => Promise<void>) | null;
@@ -32,7 +36,7 @@ export function nudgeRun(key: string, channel = "", threadTs = ""): NudgeRun {
   let run = runs.get(key);
   if (!run) {
     prune(now);
-    run = { key, channel, threadTs, count: 0, users: [], cries: [], text: "", done: true, whipTs: null, pending: 0, pendingUsers: [], touched: now, onChange: null, rerender: null, queue: Promise.resolve() };
+    run = { key, channel, threadTs, text: "", done: true, tallies: {}, touched: now, onChange: null, rerender: null, queue: Promise.resolve() };
     runs.set(key, run);
   }
   if (channel) run.channel = channel;
@@ -45,9 +49,18 @@ export function peekNudgeRun(key: string): NudgeRun | undefined {
   return runs.get(key);
 }
 
+export function tally(run: NudgeRun, id: string): NudgeTally {
+  return (run.tallies[id] ??= { count: 0, users: [], cries: [], ts: null, pending: 0, pendingUsers: [] });
+}
+
+export function nudgeCount(key: string, id: string): number {
+  return runs.get(key)?.tallies[id]?.count ?? 0;
+}
+
 export function beginNudgeRun(key: string, channel: string, threadTs: string, onChange: () => void): NudgeRun {
   const run = nudgeRun(key, channel, threadTs);
-  Object.assign(run, { count: 0, users: [], cries: [], text: "", done: false, whipTs: null, onChange, rerender: null });
+  Object.assign(run, { text: "", done: false, onChange, rerender: null });
+  for (const t of Object.values(run.tallies)) Object.assign(t, { count: 0, users: [], cries: [], ts: null });
   return run;
 }
 
@@ -68,12 +81,18 @@ export async function setNudgeFile(key: string, path: string): Promise<void> {
   files.set(key, path);
 }
 
-export async function writeNudgeFile(run: NudgeRun, cfg: NudgeConfig): Promise<void> {
+function tallyLine(run: NudgeRun, nudges: NudgeConfig[]): string {
+  return nudges.map((c) => `${c.id}=${run.tallies[c.id]?.count ?? 0}`).join(" ");
+}
+
+export async function writeNudgeFile(run: NudgeRun, nudges: NudgeConfig[]): Promise<void> {
   const path = files.get(run.key);
-  if (!path || run.done || !cfg.livePrompt) return;
-  const context = fillPrompt(cfg.livePrompt, { count: run.count, users: run.users });
+  if (!path || run.done) return;
+  const live = nudges.filter((c) => c.livePrompt && (run.tallies[c.id]?.count ?? 0) > 0);
+  if (!live.length) return;
+  const context = live.map((c) => fillPrompt(c.livePrompt, run.tallies[c.id])).join("\n");
   await writeFile(path, JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: context } }) + "\n");
-  await writeFile(`${path}.n`, `${run.count}\n`);
+  await writeFile(`${path}.n`, `${tallyLine(run, live)}\n`);
   await Promise.all([chmod(path, 0o644), chmod(`${path}.n`, 0o644)]).catch(() => {});
 }
 
@@ -85,19 +104,29 @@ export async function endNudgeRun(key: string): Promise<void> {
   const path = files.get(key);
   if (!path) return;
   files.delete(key);
-  const felt = Number((await readFile(`${path}.seen`, "utf8").catch(() => "0")).trim()) || 0;
-  run.pending = Math.max(0, run.pending - felt);
-  if (run.pending === 0) run.pendingUsers = [];
+  const seen = (await readFile(`${path}.seen`, "utf8").catch(() => "")).trim();
+  for (const pair of seen.split(/\s+/).filter(Boolean)) {
+    const [id, n] = pair.split("=");
+    const t = run.tallies[id];
+    if (!t) continue;
+    t.pending = Math.max(0, t.pending - (Number(n) || 0));
+    if (t.pending === 0) t.pendingUsers = [];
+  }
   await clearFiles(path);
 }
 
-export function takePendingNudges(key: string): { count: number; users: string[] } | null {
+export function pendingNudgeLines(key: string, nudges: NudgeConfig[]): string[] {
   const run = runs.get(key);
-  if (!run || run.pending === 0) return null;
-  const out = { count: run.pending, users: run.pendingUsers };
-  run.pending = 0;
-  run.pendingUsers = [];
-  return out;
+  if (!run) return [];
+  const lines: string[] = [];
+  for (const c of nudges) {
+    const t = run.tallies[c.id];
+    if (!t || t.pending === 0) continue;
+    if (c.prompt) lines.push(fillPrompt(c.prompt, { count: t.pending, users: t.pendingUsers }));
+    t.pending = 0;
+    t.pendingUsers = [];
+  }
+  return lines;
 }
 
 export function nudgeAllowed(cfg: NudgeConfig, channel: string): boolean {
@@ -111,14 +140,16 @@ export function pickCry(tiers: string[][], count: number, pick = Math.random, pr
   return options[Math.floor(pick() * options.length) % options.length];
 }
 
-export function recordWhip(run: NudgeRun, userId: string, cfg: NudgeConfig, pick = Math.random): void {
-  run.count++;
-  run.pending++;
-  if (!run.users.includes(userId)) run.users.push(userId);
-  if (!run.pendingUsers.includes(userId)) run.pendingUsers.push(userId);
-  const cry = pickCry(cfg.cries, run.count, pick, run.cries.at(-1));
-  if (cry) run.cries.push(cry);
+export function recordNudge(run: NudgeRun, userId: string, cfg: NudgeConfig, pick = Math.random): NudgeTally {
+  const t = tally(run, cfg.id);
+  t.count++;
+  t.pending++;
+  if (!t.users.includes(userId)) t.users.push(userId);
+  if (!t.pendingUsers.includes(userId)) t.pendingUsers.push(userId);
+  const cry = pickCry(cfg.cries, t.count, pick, t.cries.at(-1));
+  if (cry) t.cries.push(cry);
   run.touched = Date.now();
+  return t;
 }
 
 export function currentNarration(text: string): string {
@@ -139,10 +170,11 @@ export function buttonLabel(cfg: NudgeConfig, count: number): string {
   return count > 0 ? `${cfg.label} ×${count}` : cfg.label;
 }
 
-export function whipMessage(run: NudgeRun, cfg: NudgeConfig): string {
-  const who = run.users.map((u) => `<@${u}>`).join(", ");
-  const head = [emojiOf(cfg), run.count > 1 ? `×${run.count}` : "", `${who}: ${cfg.message}`].filter(Boolean).join(" ");
-  const cries = run.cries.slice(-6).join(" ");
+export function nudgeMessage(run: NudgeRun, cfg: NudgeConfig): string {
+  const t = tally(run, cfg.id);
+  const who = t.users.map((u) => `<@${u}>`).join(", ");
+  const head = [emojiOf(cfg), t.count > 1 ? `×${t.count}` : "", `${who}: ${cfg.message}`].filter(Boolean).join(" ");
+  const cries = t.cries.slice(-6).join(" ");
   const status = run.done ? cfg.doneText : currentNarration(run.text) || "Still thinking.";
   return [head, [cries, status].filter(Boolean).join(" ")].join("\n");
 }
@@ -154,13 +186,13 @@ function fillPrompt(template: string, heard: { count: number; users: string[] })
     .replaceAll("{users}", heard.users.map((u) => `<@${u}>`).join(", "));
 }
 
-export function nudgePrompt(cfg: NudgeConfig, heard: { count: number; users: string[] }): string {
-  return cfg.prompt ? fillPrompt(cfg.prompt, heard) : "";
+interface Board {
+  months: Record<string, Record<string, number>>;
+  announced: string;
 }
 
 interface Stats {
-  months: Record<string, Record<string, number>>;
-  announced: string;
+  nudges: Record<string, Board>;
 }
 
 const STATS_FILE = join(process.cwd(), ".claude", "kafu", "nudges.json");
@@ -174,18 +206,26 @@ function previousMonth(date: Date): string {
   return monthKey(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1)));
 }
 
-async function readStats(file: string): Promise<Stats> {
+function asBoard(raw: unknown): Board {
+  const b = (raw && typeof raw === "object" ? raw : {}) as Partial<Board>;
+  return { months: b.months && typeof b.months === "object" ? b.months : {}, announced: typeof b.announced === "string" ? b.announced : "" };
+}
+
+async function readStats(file: string, legacyId: string): Promise<Stats> {
   try {
-    const raw = JSON.parse(await readFile(file, "utf8")) as Partial<Stats>;
-    return { months: raw.months && typeof raw.months === "object" ? raw.months : {}, announced: typeof raw.announced === "string" ? raw.announced : "" };
+    const raw = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    const nudges: Record<string, Board> = {};
+    if (raw.nudges && typeof raw.nudges === "object") for (const [id, b] of Object.entries(raw.nudges)) nudges[id] = asBoard(b);
+    if (raw.months && !nudges[legacyId]) nudges[legacyId] = asBoard(raw);
+    return { nudges };
   } catch {
-    return { months: {}, announced: "" };
+    return { nudges: {} };
   }
 }
 
-function updateStats(file: string, change: (s: Stats) => void): Promise<void> {
+function updateStats(file: string, legacyId: string, change: (s: Stats) => void): Promise<void> {
   statsWrite = statsWrite.then(async () => {
-    const stats = await readStats(file);
+    const stats = await readStats(file, legacyId);
     change(stats);
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, JSON.stringify(stats, null, 2) + "\n");
@@ -193,9 +233,10 @@ function updateStats(file: string, change: (s: Stats) => void): Promise<void> {
   return statsWrite;
 }
 
-export function countWhip(userId: string, now = new Date(), file = STATS_FILE): Promise<void> {
-  return updateStats(file, (s) => {
-    const month = (s.months[monthKey(now)] ??= {});
+export function countNudge(id: string, userId: string, legacyId = id, now = new Date(), file = STATS_FILE): Promise<void> {
+  return updateStats(file, legacyId, (s) => {
+    const board = (s.nudges[id] ??= asBoard(null));
+    const month = (board.months[monthKey(now)] ??= {});
     month[userId] = (month[userId] ?? 0) + 1;
   });
 }
@@ -209,14 +250,15 @@ export function leaderboardText(cfg: NudgeConfig, month: string, counts: Record<
   return [`${emojiOf(cfg) ? `${emojiOf(cfg)} ` : ""}*${title}*`, ...ranked.map(([u, n], i) => `${medals[i]} <@${u}> ${n}`)].join("\n");
 }
 
-export async function dueLeaderboard(cfg: NudgeConfig, now = new Date(), file = STATS_FILE): Promise<string | null> {
+export async function dueLeaderboard(cfg: NudgeConfig, legacyId = cfg.id, now = new Date(), file = STATS_FILE): Promise<string | null> {
   if (!cfg.leaderboardChannel) return null;
   const month = previousMonth(now);
   let text: string | null = null;
-  await updateStats(file, (s) => {
-    if (s.announced >= month) return;
-    s.announced = month;
-    const counts = s.months[month];
+  await updateStats(file, legacyId, (s) => {
+    const board = (s.nudges[cfg.id] ??= asBoard(null));
+    if (board.announced >= month) return;
+    board.announced = month;
+    const counts = board.months[month];
     if (counts && Object.values(counts).some((n) => n > 0)) text = leaderboardText(cfg, month, counts);
   });
   return text;

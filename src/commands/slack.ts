@@ -27,7 +27,7 @@ import { dirname, extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { fetchWithTimeout } from "../http";
 import { matchForward, dispatchForwardedInteraction } from "../interaction-forward";
-import { beginNudgeRun, endNudgeRun, nudgeRun, peekNudgeRun, nudgeAllowed, recordWhip, writeNudgeFile, whipMessage, buttonLabel, countBadge, nudgePrompt, takePendingNudges, countWhip, dueLeaderboard } from "../nudge";
+import { beginNudgeRun, endNudgeRun, nudgeRun, peekNudgeRun, nudgeCount, nudgeAllowed, recordNudge, writeNudgeFile, nudgeMessage, buttonLabel, countBadge, pendingNudgeLines, countNudge, dueLeaderboard } from "../nudge";
 
 const SLACK_DIRECTIVES_PATH = join(import.meta.dir, "..", "..", "prompts", "slack", "DIRECTIVES.md");
 let slackDirectivesPrompt: string | null = null;
@@ -420,16 +420,21 @@ function progressBlocks(header: string, activity: string[], cancelKey: string, s
 }
 
 function nudgeButton(cancelKey: string): Record<string, unknown>[] {
-  const nudge = getSettings().slack.nudge;
   const run = peekNudgeRun(cancelKey);
-  return nudge && run && nudgeAllowed(nudge, run.channel) ? [{ type: "button", text: { type: "plain_text", text: buttonLabel(nudge, run.count), emoji: true }, action_id: NUDGE_ACTION_ID, value: cancelKey }] : [];
+  if (!run) return [];
+  return getSettings().slack.nudges
+    .filter((n) => nudgeAllowed(n, run.channel))
+    .map((n) => ({ type: "button", text: { type: "plain_text", text: buttonLabel(n, nudgeCount(cancelKey, n.id)), emoji: true }, action_id: `${NUDGE_ACTION_ID}:${n.id}`, value: cancelKey }));
 }
 
 async function announceLeaderboard(): Promise<void> {
   const config = getSettings().slack;
-  if (!config.nudge?.leaderboardChannel) return;
-  const text = await dueLeaderboard(config.nudge).catch(() => null);
-  if (text) await postMessage(config.botToken, config.nudge.leaderboardChannel, text).catch(() => {});
+  const legacyId = config.nudges[0]?.id;
+  for (const nudge of config.nudges) {
+    if (!nudge.leaderboardChannel) continue;
+    const text = await dueLeaderboard(nudge, legacyId).catch(() => null);
+    if (text) await postMessage(config.botToken, nudge.leaderboardChannel, text).catch(() => {});
+  }
 }
 
 function nudgeActions(cancelKey: string): Record<string, unknown>[] {
@@ -438,9 +443,8 @@ function nudgeActions(cancelKey: string): Record<string, unknown>[] {
 }
 
 function withNudgeCount(footer: string, cancelKey: string): string {
-  const nudge = getSettings().slack.nudge;
-  const badge = nudge ? countBadge(nudge, peekNudgeRun(cancelKey)?.count ?? 0) : "";
-  return badge ? `${footer}   ${badge}` : footer;
+  const badges = getSettings().slack.nudges.map((n) => countBadge(n, nudgeCount(cancelKey, n.id))).filter(Boolean);
+  return badges.length ? `${footer}   ${badges.join("  ")}` : footer;
 }
 
 async function postBlocks(
@@ -1791,11 +1795,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
     }
 
     const cancelKey = actingUserId ? userThreadKey(channelId, replyThreadTs, actingUserId) : `slk:${channelId}:${replyThreadTs}`;
-    const heardNudges = config.nudge ? takePendingNudges(cancelKey) : null;
-    if (config.nudge && heardNudges) {
-      const line = nudgePrompt(config.nudge, heardNudges);
-      if (line) promptParts.push(line);
-    }
+    promptParts.push(...pendingNudgeLines(cancelKey, config.nudges));
 
     const prefixedPrompt = promptParts.join("\n");
 
@@ -2061,7 +2061,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       const footerFor = (): Record<string, unknown>[] => doneFooter ? [{ type: "context", elements: [{ type: "mrkdwn", text: withNudgeCount(doneFooter, cancelKey) }] }, ...nudgeActions(cancelKey)] : [];
       const footerBlocks = footerFor();
       const keepWhippable = (ts: string) => {
-        if (!doneFooter || !config.nudge || !live.done) return;
+        if (!doneFooter || !config.nudges.length || !live.done) return;
         live.rerender = async () => {
           const blocks = answerBlocks(finalText, [...footerFor(), ...handoffBlocks]);
           if (blocks) await slackApi(config.botToken, "chat.update", { channel: channelId, ts, text: finalText, blocks });
@@ -2222,8 +2222,9 @@ async function handleBlockAction(payload: any): Promise<void> {
     return;
   }
 
-  if (actionId === NUDGE_ACTION_ID) {
-    const nudge = config.nudge;
+  if (actionId === NUDGE_ACTION_ID || actionId.startsWith(`${NUDGE_ACTION_ID}:`)) {
+    const id = actionId.slice(NUDGE_ACTION_ID.length + 1);
+    const nudge = id ? config.nudges.find((n) => n.id === id) : config.nudges[0];
     const key = action.value ?? "";
     const threadTs = message?.thread_ts ?? message?.ts ?? "";
     if (!nudge || !key) return;
@@ -2233,13 +2234,13 @@ async function handleBlockAction(payload: any): Promise<void> {
     }
     const run = nudgeRun(key, channelId, threadTs);
     run.queue = run.queue.then(async () => {
-      recordWhip(run, user.id, nudge);
-      void countWhip(user.id);
-      await writeNudgeFile(run, nudge).catch(() => {});
+      const t = recordNudge(run, user.id, nudge);
+      void countNudge(nudge.id, user.id, config.nudges[0]?.id);
+      await writeNudgeFile(run, config.nudges).catch(() => {});
       if (nudge.reaction && message?.ts) void sendReaction(config.botToken, channelId, message.ts, nudge.reaction);
-      const text = whipMessage(run, nudge);
-      if (run.whipTs) await updateMessage(config.botToken, channelId, run.whipTs, text).catch(() => {});
-      else run.whipTs = await postMessage(config.botToken, channelId, text, run.threadTs || threadTs).catch(() => null);
+      const text = nudgeMessage(run, nudge);
+      if (t.ts) await updateMessage(config.botToken, channelId, t.ts, text).catch(() => {});
+      else t.ts = await postMessage(config.botToken, channelId, text, run.threadTs || threadTs).catch(() => null);
       run.onChange?.();
       await run.rerender?.().catch(() => {});
     }).catch((err) => debugLog(`nudge failed: ${err instanceof Error ? err.message : err}`));

@@ -1197,13 +1197,13 @@ async function execClaude(
   const effort = identity?.effort || settings.effort;
   if (effort) args.push("--effort", effort);
 
-  const nudge = settings.slack.nudge;
-  if (cancelKey && nudge?.livePrompt) {
+  const nudges = settings.slack.nudges;
+  if (cancelKey && nudges.some((n) => n.livePrompt)) {
     const path = join(baseEnv.TMPDIR || tmpdir(), `kafu-nudge-${createHash("sha256").update(cancelKey).digest("hex").slice(0, 16)}.json`);
     baseEnv.KAFU_NUDGE_FILE = path;
     await setNudgeFile(cancelKey, path);
     const live = peekNudgeRun(cancelKey);
-    if (live?.count) await writeNudgeFile(live, nudge).catch(() => {});
+    if (live) await writeNudgeFile(live, nudges).catch(() => {});
     if (!isolationEnabled()) args.push("--settings", JSON.stringify({ hooks: nudgeHookSettings() }));
   }
 
