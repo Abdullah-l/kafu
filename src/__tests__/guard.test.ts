@@ -113,6 +113,30 @@ describe("guard: instruction files", () => {
   });
 });
 
+describe("guard: a cloned repo's CLAUDE.md", () => {
+  test("allows shell edits to CLAUDE.md inside a checkout", () => {
+    expect(bash("sed -i 's/Bobby/Alice/' CLAUDE.md", normalCheckout)).toBeNull();
+    expect(bash("cd acme-api && sed -i 's/Bobby/Alice/' CLAUDE.md")).toBeNull();
+    expect(bash(`sed -i 's/Bobby/Alice/' ${join(normalCheckout, "CLAUDE.md")}`)).toBeNull();
+    expect(bash("python3 fix.py docs/CLAUDE.md", normalCheckout)).toBeNull();
+    expect(bash("cp notes.md CLAUDE.md", tmpCheckout)).toBeNull();
+  });
+
+  test("still blocks the live files and anything it can't follow", () => {
+    expect(bash("sed -i 's/Bobby/Alice/' CLAUDE.md")).not.toBeNull();
+    expect(bash("sed -i 's/x/y/' ../CLAUDE.md", normalCheckout)).not.toBeNull();
+    expect(bash("cd acme-api && cd .. && echo x > CLAUDE.md")).not.toBeNull();
+    expect(bash("(cd acme-api) && echo x > CLAUDE.md")).not.toBeNull();
+    expect(bash("cd $HOME && echo x > CLAUDE.md", normalCheckout)).not.toBeNull();
+    expect(bash("bash -c 'cd .. && echo x > CLAUDE.md'", normalCheckout)).not.toBeNull();
+    expect(bash("echo x > .claude/settings.json", normalCheckout)).not.toBeNull();
+    expect(bash(`cp CLAUDE.md ${join(work, "CLAUDE.md")}`, normalCheckout)).not.toBeNull();
+    expect(bash(`echo x > ${join(root, "users", "U1", "claude", "CLAUDE.md")}`, normalCheckout)).not.toBeNull();
+    expect(bash("echo x > thread/CLAUDE.md", tmpCheckout)).not.toBeNull();
+    expect(bash("git -C .. commit -m x && echo x > CLAUDE.md", normalCheckout)).not.toBeNull();
+  });
+});
+
 describe("guard: GitHub policy", () => {
   test("blocks merging, settings, secrets, workflows and releases", () => {
     expect(bash("gh pr merge 2902 --squash", normalCheckout)).toContain("Merging");

@@ -129,6 +129,8 @@ const PUBLISH = /\bgit\b[^;&|\n]*\bpush\b|\bgh\s+(pr|api|release|issue|workflow|
 const NETWORK_WRITE = /\bgit\b[^;&|\n]*\bpush\b|\bgh\b|\bcurl\b|\bwget\b|\bhttpie?\b|\bfetch\s*\(|\brequests\.|\burllib\b|\baxios\b|\bgraphql\b/i;
 const FILE_WRITE = />>?|\btee\b|\bcp\b|\bmv\b|\brm\b|\bln\b|\bsed\s+-i|\bperl\s+-[a-z]*i|\btruncate\b|\binstall\b|\brsync\b|\bdd\b|\bchmod\b|\bchown\b|\btouch\b|\bpython3?\b|\bnode\b|\bbun\b|\bruby\b|\bperl\b|\bwrite/i;
 const MEMORY_REF = /CLAUDE(\.local)?\.md|\/\.claude\/|\.claude\b|CLAUDE_CONFIG_DIR|managed-settings/i;
+const MEMORY_TOKEN = /[^\s'"`;&|<>=,:]*(?:CLAUDE(?:\.local)?\.md|\.claude\b|CLAUDE_CONFIG_DIR|managed-settings)[^\s'"`;&|<>=,:]*/gi;
+const SHELL_INDIRECTION = /[$`(){}~*?\\]|\.\.|\b(pushd|popd|eval|exec|source|chdir|xargs)\b|\s-C\b|--(chdir|cwd|directory|git-dir|work-tree)\b|\b(sh|bash|zsh|dash)\b/;
 
 function slugPattern(repo: string): RegExp {
   const [owner, name] = repo.split("/").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
@@ -200,6 +202,25 @@ function isMemoryPath(path: string, cwd: string, env: Record<string, string | un
   return isMemoryFile(full, env, (p) => p) || isMemoryFile(realPath(full), env, realPath);
 }
 
+function writesOnlyRepoInstructions(shell: string, cwd: string, env: Record<string, string | undefined>): boolean {
+  if (SHELL_INDIRECTION.test(shell)) return false;
+  let dir = cwd;
+  let seen = false;
+  for (const segment of splitCommands(shell)) {
+    const cd = segment.match(/^cd\s+("[^"]+"|'[^']+'|[^\s"']+)$/);
+    if (cd) {
+      dir = resolve(dir, cd[1].replace(/^["']|["']$/g, ""));
+      continue;
+    }
+    if (/\bcd\b/.test(segment)) return false;
+    for (const [ref] of segment.matchAll(MEMORY_TOKEN)) {
+      seen = true;
+      if (!MEMORY_NAME.test(ref) || isMemoryPath(ref, dir, env)) return false;
+    }
+  }
+  return seen;
+}
+
 const MESSAGE_ARG = /(\b(?:git\b[^;&|\n]*\b(?:commit|tag)|gh\s+(?:pr|issue)\s+(?:create|edit|comment|review))\b[^;&|\n]*?\s)(-m|--message|-t|--title|-b|--body)(=|\s+)("(?:[^"\\$`]|\\.)+"|'[^']+')/;
 
 function stripMessageText(command: string): string {
@@ -235,7 +256,7 @@ export function decide(input: GuardInput, ctx: GuardContext): string | null {
     if (policy) return policy;
     const shell = stripMessageText(command);
     const outsideKafuData = shell.replace(/[^\s'"`]*\/\.claude\/kafu\/[^\s'"`]*/g, " ");
-    if (MEMORY_REF.test(outsideKafuData) && FILE_WRITE.test(shell)) {
+    if (MEMORY_REF.test(outsideKafuData) && FILE_WRITE.test(shell) && !writesOnlyRepoInstructions(outsideKafuData, cwd, ctx.env)) {
       return "My instruction files (CLAUDE.md, .claude settings) can't be changed from a chat.";
     }
     return null;
