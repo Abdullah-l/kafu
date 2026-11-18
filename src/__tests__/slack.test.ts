@@ -106,6 +106,10 @@ describe("runStatusLine", () => {
       .toBe("⏱ 1h 02m   🧠 Sonnet 5.5   📚 75% left (750k of 1M)");
   });
 
+  test("shows the effort next to the model", () => {
+    expect(runStatusLine({ model: "claude-fable-5-2", effort: "high" }, 5_000)).toBe("⏱ 5s   🧠 Fable 5.2 · high");
+  });
+
   test("formats elapsed time", () => {
     expect(formatElapsed(0)).toBe("0s");
     expect(formatElapsed(605_000)).toBe("10m 05s");

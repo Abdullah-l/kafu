@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import { normalizeTimezoneName, resolveTimezoneOffsetMinutes } from "./timezone";
 import { parseWatchdogConfig, type WatchdogConfig } from "./watchdog";
 import { parsePlugins, type PluginEntry } from "./plugins";
+import { resolveEffort } from "./models";
 
 export type WatchdogSettings = WatchdogConfig;
 
@@ -20,6 +21,7 @@ export function getAgentsDir(): string {
 
 const DEFAULT_SETTINGS: Settings = {
   model: "",
+  effort: "",
   api: "",
   fallback: {
     model: "",
@@ -260,6 +262,7 @@ export interface TimeoutsConfig {
 
 export interface Settings {
   model: string;
+  effort: string;
   api: string;
   fallback: ModelConfig;
   agentic: AgenticConfig;
@@ -394,6 +397,7 @@ function parseSettings(raw: Record<string, any>): Settings {
 
   return {
     model: typeof raw.model === "string" ? raw.model.trim() : "",
+    effort: typeof raw.effort === "string" ? resolveEffort(raw.effort) ?? "" : "",
     api: typeof raw.api === "string" ? raw.api.trim() : "",
     fallback: {
       model: typeof raw.fallback?.model === "string" ? raw.fallback.model.trim() : "",

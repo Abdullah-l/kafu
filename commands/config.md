@@ -68,6 +68,7 @@ Ask for confirmation with **AskUserQuestion**, then write the defaults:
 ```json
 {
   "model": "",
+  "effort": "",
   "api": "",
   "fallback": { "model": "", "api": "" },
   "timezone": "UTC",
@@ -86,6 +87,7 @@ Ask for confirmation with **AskUserQuestion**, then write the defaults:
 | Key | Type | Description |
 |-----|------|-------------|
 | `model` | string | Claude model ID or alias. Empty = Claude Code default |
+| `effort` | string | `low`, `medium`, `high`, `xhigh` or `max`, passed as `--effort`. People can override it with the `effort` command. Empty = Claude Code default |
 | `api` | string | Optional Anthropic API key passed as `ANTHROPIC_AUTH_TOKEN` |
 | `fallback.model` | string | Model used when the primary run is rate limited |
 | `fallback.api` | string | Optional API key for the fallback model |

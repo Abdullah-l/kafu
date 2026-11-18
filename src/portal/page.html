@@ -88,8 +88,17 @@
         select.appendChild(opt);
       });
       select.addEventListener("change", function () { api("/api/model", { model: select.value }).then(refresh); });
+      var effort = el("select", { id: "effort" });
+      effort.appendChild(el("option", { value: "", text: "Default (" + state.defaultEffort + ")" }));
+      state.efforts.forEach(function (level) {
+        var opt = el("option", { value: level, text: level });
+        if (level === c.effort) opt.selected = true;
+        effort.appendChild(opt);
+      });
+      effort.addEventListener("change", function () { api("/api/effort", { effort: effort.value }).then(refresh); });
       body.push(el("div", { class: "panel" }, [
         el("div", { class: "field" }, [el("label", { for: "model", text: "Model" }), select]),
+        el("div", { class: "field" }, [el("label", { for: "effort", text: "Effort" }), effort]),
         el("div", { class: "actions" }, [el("button", { class: "ghost danger", text: "Disconnect", onclick: function () { if (confirm(c.shared ? "Disconnect the shared Claude account? The bot stops working for everyone until someone signs in again." : "Disconnect your Claude account?")) api("/api/claude/logout", {}).then(refresh); } })]),
       ]));
     }

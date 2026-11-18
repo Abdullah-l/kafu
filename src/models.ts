@@ -14,6 +14,13 @@ export const MODELS: ModelOption[] = [
 
 export const FAST_MODEL = "haiku";
 
+export const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+export function resolveEffort(input: string): string | null {
+  const wanted = input.trim().toLowerCase();
+  return EFFORTS.includes(wanted) ? wanted : null;
+}
+
 const FULL_ID = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/i;
 
 export function latestModel(id: string): string {

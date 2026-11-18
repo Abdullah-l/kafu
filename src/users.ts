@@ -14,6 +14,7 @@ export interface UserRecord {
   id: string;
   token: string | null;
   model: string;
+  effort?: string;
   secrets: Record<string, string>;
   createdAt: string;
   updatedAt: string;
@@ -23,6 +24,7 @@ interface StoredUser {
   id: string;
   token: string | null;
   model: string;
+  effort?: string;
   secrets?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
@@ -33,6 +35,7 @@ export interface RunIdentity {
   token: string;
   configDir: string;
   model: string;
+  effort: string;
   secrets: Record<string, string>;
   readable?: string[];
 }
@@ -187,6 +190,10 @@ export async function clearUserToken(userId: string): Promise<boolean> {
   return true;
 }
 
+export async function setUserEffort(userId: string, effort: string): Promise<void> {
+  await updateUser(userId, (user) => { user.effort = effort.trim(); });
+}
+
 export async function setUserModel(userId: string, model: string): Promise<void> {
   await updateUser(userId, (user) => { user.model = model.trim(); });
 }
@@ -218,5 +225,5 @@ export async function getRunIdentity(userId: string): Promise<RunIdentity | null
   const configDir = userConfigDir(userId);
   await mkdir(configDir, { recursive: true, mode: 0o700 });
   await chmod(userDir(userId), 0o700).catch(() => {});
-  return { userId, token: account.token, configDir, model: latestModel(account.model ?? ""), secrets: user?.secrets ?? {} };
+  return { userId, token: account.token, configDir, model: latestModel(account.model ?? ""), effort: account.effort ?? "", secrets: user?.secrets ?? {} };
 }

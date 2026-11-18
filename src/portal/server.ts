@@ -8,6 +8,7 @@ import {
   connectWithSecret,
   startDeviceConnect,
   disconnectService,
+  changeEffort,
   changeModel,
 } from "../accounts";
 import { createLinkToken, redeemLinkToken, createSessionToken, sessionUser, SESSION_MAX_AGE_SECONDS } from "./auth";
@@ -140,6 +141,10 @@ async function handle(req: Request): Promise<Response> {
     if (url.pathname === "/api/model" && req.method === "POST") {
       const body = await readJson(req);
       return json(await changeModel(userId, String(body.model ?? "")));
+    }
+    if (url.pathname === "/api/effort" && req.method === "POST") {
+      const body = await readJson(req);
+      return json(await changeEffort(userId, String(body.effort ?? "")));
     }
 
     if (url.pathname === "/api/conversations" && req.method === "GET") return json({ conversations: await listConversations(userId) });

@@ -1,8 +1,8 @@
 import { CLAUDE_EXECUTABLE } from "./runner";
-import { getUser, saveUserToken, clearUserToken, setUserModel, userScratchDir, setUserSecret, clearUserSecret, claudeAccountOwner, sharedAccountEnabled, isAccountAdmin } from "./users";
+import { getUser, saveUserToken, clearUserToken, setUserModel, setUserEffort, userScratchDir, setUserSecret, clearUserSecret, claudeAccountOwner, sharedAccountEnabled, isAccountAdmin } from "./users";
 import { startGhDeviceLogin, startAppDeviceLogin, cancelGhLogin } from "./gh-login";
 import { startLogin, submitLoginCode, cancelLogin, pendingLoginUrl } from "./login";
-import { MODELS, choiceLabel, latestModel } from "./models";
+import { EFFORTS, MODELS, choiceLabel, latestModel, resolveEffort } from "./models";
 import { getSettings, type CredentialSpec } from "./config";
 
 export interface DeviceState {
@@ -24,9 +24,11 @@ export interface ServiceStatus {
 
 export interface AccountStatus {
   userId: string;
-  claude: { connected: boolean; model: string; modelLabel: string; signInUrl: string | null; shared: boolean; canManage: boolean };
+  claude: { connected: boolean; model: string; modelLabel: string; effort: string; signInUrl: string | null; shared: boolean; canManage: boolean };
   defaultModel: string;
   models: { id: string; label: string; description: string }[];
+  defaultEffort: string;
+  efforts: string[];
   services: ServiceStatus[];
 }
 
@@ -79,12 +81,15 @@ export async function accountStatus(userId: string): Promise<AccountStatus> {
       connected: !!account?.token,
       model: latestModel(account?.model ?? ""),
       modelLabel: account?.model ? choiceLabel(account.model) : `${defaultModel} (default)`,
+      effort: account?.effort ?? "",
       signInUrl: account?.token || !canManage ? null : pendingLoginUrl(claudeLoginKey(userId)),
       shared,
       canManage,
     },
     defaultModel,
     models: MODELS.map((m) => ({ id: m.id, label: m.label, description: m.description })),
+    defaultEffort: getSettings().effort || "Claude Code default",
+    efforts: EFFORTS,
     services: credentialSpecs().map((spec) => ({
       id: spec.id,
       label: spec.label,
@@ -167,6 +172,19 @@ export async function disconnectService(userId: string, id: string): Promise<boo
   cancelGhLogin(deviceKey(userId, spec.id));
   deviceStates.delete(deviceKey(userId, spec.id));
   return clearUserSecret(userId, spec.id);
+}
+
+export async function changeEffort(userId: string, input: string): Promise<Result> {
+  if (sharedAccountEnabled() && !isAccountAdmin(userId)) return { ok: false, error: SHARED_ACCOUNT_ADMIN_ONLY };
+  const owner = claudeAccountOwner(userId);
+  if (!input || input === "default") {
+    await setUserEffort(owner, "");
+    return { ok: true };
+  }
+  const effort = resolveEffort(input);
+  if (!effort) return { ok: false, error: "Unknown effort" };
+  await setUserEffort(owner, effort);
+  return { ok: true };
 }
 
 export async function changeModel(userId: string, input: string): Promise<Result> {

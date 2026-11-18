@@ -41,7 +41,8 @@ The first run creates `.claude/kafu/settings.json`. Fill in the connectors you w
 
 ```json
 {
-  "model": "claude-opus-5-5",
+  "model": "opus",
+  "effort": "high",
   "slack": {
     "botToken": "xoxb-...",
     "appToken": "xapp-...",
@@ -83,7 +84,7 @@ Turn on multi-user mode to share one Slack bot across a team. Every request runs
 
 Everyone's requests run on the server, each with their own Claude config folder, sessions and stored credentials. Use this with Claude Team/Enterprise or API-key setups; check that your plan's terms allow it before sharing personal subscriptions this way.
 
-- Connections page (`multiUser.portal`): Slack hands each person a private one-time link to a page where they sign in with Claude (the official `claude setup-token` flow), connect GitHub through a device code, paste other service tokens, see their status and pick a model. `linkNote` (Slack mrkdwn) is added to the message that carries the link, for things like "turn on your VPN first". The page also has a Conversations tab listing each person's threads with links back to Slack and delete. Without the portal, the same setup works through DM commands: `login`, `logout`, `whoami`, `model`, `connect`, `connect <service>`, `disconnect <service>`.
+- Connections page (`multiUser.portal`): Slack hands each person a private one-time link to a page where they sign in with Claude (the official `claude setup-token` flow), connect GitHub through a device code, paste other service tokens, see their status and pick a model and effort level. Model choices are family aliases (`fable`, `opus`, `sonnet`, `haiku`), so runs always use the newest model, and the run footer shows the exact model and effort. `linkNote` (Slack mrkdwn) is added to the message that carries the link, for things like "turn on your VPN first". The page also has a Conversations tab listing each person's threads with links back to Slack and delete. Without the portal, the same setup works through DM commands: `login`, `logout`, `whoami`, `model`, `effort`, `connect`, `connect <service>`, `disconnect <service>`.
 - Per-person service credentials: list them in `multiUser.credentials` (`id`, `label`, `env`, `help`, optional `pattern`; `"method": "github"` with optional `scopes` for the device sign-in). Each value is stored encrypted and exported as `env` only for that person's runs. Shared MCP servers in `multiUser.mcpConfig` (default `.mcp.json`) that reference `${ENV}` for a credential the person hasn't connected are left out of their session. Shared MCP servers whose `${ENV}` values are all shared keys (not per-person credentials) run outside people's sandboxes, as their own OS user, and runs reach them through kafu with their run token; those keys are never in a run's environment.
 - Tokens are encrypted with `KAFU_SECRET_KEY` (32 bytes, base64), or a key generated at `.claude/kafu/secret.key`.
 - Run kafu as root (in a container) and each person's server runs get their own OS user (`setpriv`, no capabilities, `no_new_privs`), with private config, home and work folders. Runs can't read each other's files, transcripts or process environments, and can't touch kafu's own state. As a normal user, everyone's runs share that one user.

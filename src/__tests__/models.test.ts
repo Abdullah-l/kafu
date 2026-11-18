@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { FAST_MODEL, MODELS, choiceLabel, latestModel, modelLabel } from "../models";
+import { EFFORTS, FAST_MODEL, MODELS, choiceLabel, latestModel, modelLabel, resolveEffort } from "../models";
 
 describe("models", () => {
   test("the picker offers family aliases so runs always get the newest model", () => {
@@ -23,5 +23,15 @@ describe("models", () => {
     expect(modelLabel("fable")).toBe("Fable (latest)");
     expect(modelLabel("my-custom-model")).toBe("my-custom-model");
     expect(choiceLabel("claude-opus-5-5")).toBe("Opus (latest)");
+  });
+});
+
+describe("effort", () => {
+  test("accepts Claude Code's levels only", () => {
+    expect(EFFORTS).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(resolveEffort(" High ")).toBe("high");
+    expect(resolveEffort("max")).toBe("max");
+    expect(resolveEffort("turbo")).toBeNull();
+    expect(resolveEffort("")).toBeNull();
   });
 });

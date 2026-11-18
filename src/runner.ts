@@ -492,6 +492,7 @@ async function runClaudeOnce(
 
 export interface RunMeta {
   model?: string;
+  effort?: string;
   contextTokens?: number;
   contextWindow?: number;
 }
@@ -584,7 +585,8 @@ export async function runClaudeStream(
           }
           if (cancelKey && event.type === "system" && event.subtype === "init" && typeof event.model === "string") {
             initModel = event.model;
-            emitRunMeta(cancelKey, { model: initModel, contextWindow: contextWindowFor(model, initModel) });
+            const effortAt = args.indexOf("--effort");
+            emitRunMeta(cancelKey, { model: initModel, contextWindow: contextWindowFor(model, initModel), ...(effortAt >= 0 ? { effort: args[effortAt + 1] } : {}) });
           }
           if (cancelKey && event.type === "assistant" && (event.message as any)?.usage) {
             const u = (event.message as any).usage;
@@ -1188,6 +1190,9 @@ async function execClaude(
     if (spawnCwd) baseEnv.KAFU_WORKDIR = spawnCwd;
     baseEnv[RUN_AS_ENV] = String(uid);
   }
+
+  const effort = identity?.effort || settings.effort;
+  if (effort) args.push("--effort", effort);
 
   let exec = await runClaudeStream(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs, spawnCwd, onChunk, onToolEvent, cancelKey);
   const primaryRateLimit = extractRateLimitMessage(exec.rawStdout, exec.stderr);

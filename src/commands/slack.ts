@@ -382,7 +382,7 @@ function formatTokens(n: number): string {
 
 export function runStatusLine(meta: RunMeta, elapsedMs: number): string {
   const parts = [`⏱ ${formatElapsed(elapsedMs)}`];
-  if (meta.model) parts.push(`🧠 ${modelLabel(meta.model.replace(/\[1m\]$/i, ""))}`);
+  if (meta.model) parts.push(`🧠 ${modelLabel(meta.model.replace(/\[1m\]$/i, ""))}${meta.effort ? ` · ${meta.effort}` : ""}`);
   if (meta.contextTokens) {
     const compactAt = Number(process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW);
     const window = Math.min(meta.contextWindow ?? 200_000, Number.isFinite(compactAt) && compactAt > 0 ? compactAt : Infinity);
@@ -2364,7 +2364,7 @@ async function handleMultiUserSlashCommand(command: string, userId: string): Pro
       ].join("\n");
     }
     default:
-      return `\`${command}\` isn't available when the bot is shared. DM me \`login\`, \`logout\`, \`whoami\` or \`model\`.`;
+      return `\`${command}\` isn't available when the bot is shared. DM me \`login\`, \`logout\`, \`whoami\`, \`model\` or \`effort\`.`;
   }
 }
 

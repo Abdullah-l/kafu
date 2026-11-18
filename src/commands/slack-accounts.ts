@@ -1,10 +1,10 @@
 import { CLAUDE_EXECUTABLE } from "../runner";
-import { getUser, saveUserToken, clearUserToken, setUserModel, userScratchDir, setUserSecret, clearUserSecret, sharedAccountEnabled, isAccountAdmin, claudeAccountOwner } from "../users";
+import { getUser, saveUserToken, clearUserToken, setUserModel, setUserEffort, userScratchDir, setUserSecret, clearUserSecret, sharedAccountEnabled, isAccountAdmin, claudeAccountOwner } from "../users";
 import { startGhDeviceLogin, cancelGhLogin } from "../gh-login";
 import { startLogin, submitLoginCode, cancelLogin, hasPendingLogin, pendingLoginUrl, looksLikeLoginCode } from "../login";
-import { MODELS, choiceLabel, modelLabel } from "../models";
+import { EFFORTS, MODELS, choiceLabel, modelLabel, resolveEffort } from "../models";
 import { getSettings, type CredentialSpec } from "../config";
-import { changeModel } from "../accounts";
+import { changeEffort, changeModel } from "../accounts";
 import { portalLink } from "../portal/server";
 
 export interface AccountIO {
@@ -47,6 +47,7 @@ async function handlePortalMode(userId: string, lower: string, respond: (text: s
       "",
       "`connect`: open your connections page (Claude, GitHub and other services)",
       "`model` / `model <name>`: show or change your model",
+      "`effort` / `effort <level>`: show or change how much effort Claude puts in",
       "`help`: this message",
     ].join("\n"));
     return true;
@@ -72,7 +73,28 @@ async function handlePortalMode(userId: string, lower: string, respond: (text: s
       : result.error === "Unknown model" ? `I don't know that model. Pick one of:\n${modelList()}` : result.error ?? "That didn't work.");
     return true;
   }
+  const effort = lower.match(/^effort(?:\s+(\S+))?$/);
+  if (effort) {
+    if (!effort[1]) {
+      const user = await getUser(claudeAccountOwner(userId));
+      await respond(`Effort: ${effortText(user?.effort)}\n\n${effortHelp()}`);
+      return true;
+    }
+    const result = await changeEffort(userId, effort[1]);
+    await respond(result.ok
+      ? (effort[1] === "default" ? "Back to the default effort." : `Effort set to ${resolveEffort(effort[1])}.`)
+      : result.error === "Unknown effort" ? `I don't know that level. ${effortHelp()}` : result.error ?? "That didn't work.");
+    return true;
+  }
   return false;
+}
+
+function effortText(effort: string | undefined): string {
+  return effort || `${getSettings().effort || "Claude Code default"} (default)`;
+}
+
+function effortHelp(): string {
+  return `Change it with \`effort <level>\`: ${EFFORTS.map((e) => `\`${e}\``).join(", ")}, or \`default\` for the bot default.`;
 }
 
 export const CONNECT_ACTION_PREFIX = "kafu_connect:";
@@ -231,7 +253,7 @@ export async function handleAccountMessage(
     return true;
   }
 
-  if (isDirectMessage && pendingSecrets.has(userId) && !/^(connect|disconnect|login|logout|whoami|account|model|help)\b/.test(lower)) {
+  if (isDirectMessage && pendingSecrets.has(userId) && !/^(connect|disconnect|login|logout|whoami|account|model|effort|help)\b/.test(lower)) {
     const { id } = pendingSecrets.get(userId)!;
     const spec = credentialSpecs().find((c) => c.id === id);
     pendingSecrets.delete(userId);
@@ -266,6 +288,7 @@ export async function handleAccountMessage(
       "",
       "`login` / `logout`: connect or disconnect your Claude account",
       "`model` / `model <name>`: show or change your model",
+      "`effort` / `effort <level>`: show or change how much effort Claude puts in",
     ];
     if (credentialSpecs().length > 0) lines.push("`connect` / `connect <service>` / `disconnect <service>`: your service tokens");
     lines.push("`whoami`: what's connected", "`help`: this message");
@@ -291,7 +314,7 @@ export async function handleAccountMessage(
     const user = await getUser(userId);
     const model = user?.model ? choiceLabel(user.model) : `${getSettings().model || "Claude Code default"} (default)`;
     const claude = user?.token
-      ? `Claude: connected with your own account. Model: ${model}.`
+      ? `Claude: connected with your own account. Model: ${model}. Effort: ${effortText(user.effort)}.`
       : "Claude: not connected. Send `login` to connect your Claude account.";
     await respond(credentialSpecs().length > 0 ? `${claude}\n\n${await connectionList(userId)}` : claude);
     return true;
@@ -351,6 +374,27 @@ export async function handleAccountMessage(
     }
     await setUserModel(userId, id);
     await respond(`Switched to ${modelLabel(id)}.`);
+    return true;
+  }
+
+  if (word === "effort" && trimmed.split(/\s+/).length <= 2) {
+    const user = await getUser(userId);
+    if (!arg) {
+      await respond(`Your effort: ${effortText(user?.effort)}\n\n${effortHelp()}`);
+      return true;
+    }
+    if (arg === "default") {
+      await setUserEffort(userId, "");
+      await respond("Back to the default effort.");
+      return true;
+    }
+    const level = resolveEffort(arg);
+    if (!level) {
+      await respond(`I don't know that level. ${effortHelp()}`);
+      return true;
+    }
+    await setUserEffort(userId, level);
+    await respond(`Effort set to ${level}.`);
     return true;
   }
 
