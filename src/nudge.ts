@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { NudgeConfig } from "./config";
 
@@ -51,11 +51,44 @@ export function beginNudgeRun(key: string, channel: string, threadTs: string, on
   return run;
 }
 
-export function endNudgeRun(key: string): void {
+const files = new Map<string, string>();
+
+export const NUDGE_HOOK_COMMAND = `f="$KAFU_NUDGE_FILE"; [ -n "$f" ] && [ -f "$f.n" ] || exit 0; n=$(cat "$f.n"); [ "$n" = "$(cat "$f.seen" 2>/dev/null)" ] && exit 0; cat "$f" && echo "$n" > "$f.seen"`;
+
+export function nudgeHookSettings(): Record<string, unknown> {
+  return { PostToolUse: [{ matcher: "*", hooks: [{ type: "command", command: NUDGE_HOOK_COMMAND, timeout: 5 }] }] };
+}
+
+async function clearFiles(path: string): Promise<void> {
+  await Promise.all([path, `${path}.n`, `${path}.seen`].map((f) => rm(f, { force: true }).catch(() => {})));
+}
+
+export async function setNudgeFile(key: string, path: string): Promise<void> {
+  await clearFiles(path);
+  files.set(key, path);
+}
+
+export async function writeNudgeFile(run: NudgeRun, cfg: NudgeConfig): Promise<void> {
+  const path = files.get(run.key);
+  if (!path || run.done || !cfg.livePrompt) return;
+  const context = fillPrompt(cfg.livePrompt, { count: run.count, users: run.users });
+  await writeFile(path, JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: context } }) + "\n");
+  await writeFile(`${path}.n`, `${run.count}\n`);
+  await Promise.all([chmod(path, 0o644), chmod(`${path}.n`, 0o644)]).catch(() => {});
+}
+
+export async function endNudgeRun(key: string): Promise<void> {
   const run = runs.get(key);
   if (!run) return;
   run.done = true;
   run.onChange = null;
+  const path = files.get(key);
+  if (!path) return;
+  files.delete(key);
+  const felt = Number((await readFile(`${path}.seen`, "utf8").catch(() => "0")).trim()) || 0;
+  run.pending = Math.max(0, run.pending - felt);
+  if (run.pending === 0) run.pendingUsers = [];
+  await clearFiles(path);
 }
 
 export function takePendingNudges(key: string): { count: number; users: string[] } | null {
@@ -67,10 +100,11 @@ export function takePendingNudges(key: string): { count: number; users: string[]
   return out;
 }
 
-export function pickCry(tiers: string[][], count: number, pick = Math.random): string {
+export function pickCry(tiers: string[][], count: number, pick = Math.random, previous = ""): string {
   if (!tiers.length) return "";
   const tier = tiers[Math.min(Math.max(count, 1), tiers.length) - 1];
-  return tier[Math.floor(pick() * tier.length) % tier.length];
+  const options = tier.length > 1 ? tier.filter((c) => c !== previous) : tier;
+  return options[Math.floor(pick() * options.length) % options.length];
 }
 
 export function recordWhip(run: NudgeRun, userId: string, cfg: NudgeConfig, pick = Math.random): void {
@@ -78,7 +112,7 @@ export function recordWhip(run: NudgeRun, userId: string, cfg: NudgeConfig, pick
   run.pending++;
   if (!run.users.includes(userId)) run.users.push(userId);
   if (!run.pendingUsers.includes(userId)) run.pendingUsers.push(userId);
-  const cry = pickCry(cfg.cries, run.count, pick);
+  const cry = pickCry(cfg.cries, run.count, pick, run.cries.at(-1));
   if (cry) run.cries.push(cry);
   run.touched = Date.now();
 }
@@ -109,12 +143,15 @@ export function whipMessage(run: NudgeRun, cfg: NudgeConfig): string {
   return [head, [cries, status].filter(Boolean).join(" ")].join("\n");
 }
 
-export function nudgePrompt(cfg: NudgeConfig, heard: { count: number; users: string[] }): string {
-  if (!cfg.prompt) return "";
-  return cfg.prompt
+function fillPrompt(template: string, heard: { count: number; users: string[] }): string {
+  return template
     .replaceAll("{count}", String(heard.count))
     .replaceAll("{times}", heard.count === 1 ? "once" : `${heard.count} times`)
     .replaceAll("{users}", heard.users.map((u) => `<@${u}>`).join(", "));
+}
+
+export function nudgePrompt(cfg: NudgeConfig, heard: { count: number; users: string[] }): string {
+  return cfg.prompt ? fillPrompt(cfg.prompt, heard) : "";
 }
 
 interface Stats {

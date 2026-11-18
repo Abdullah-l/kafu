@@ -35,6 +35,9 @@ import { FAST_MODEL } from "./models";
 import { recordResult, abortReason, clearSession, startSession } from "./watchdog";
 import { getPluginManager, type EventContext } from "./plugins";
 import type { RunIdentity } from "./users";
+import { nudgeHookSettings, peekNudgeRun, setNudgeFile, writeNudgeFile } from "./nudge";
+import { createHash } from "crypto";
+import { tmpdir } from "os";
 import { filterMcpConfig, type McpConfigFile } from "./mcp-filter";
 
 const LOGS_DIR = join(process.cwd(), ".claude/kafu/logs");
@@ -1193,6 +1196,16 @@ async function execClaude(
 
   const effort = identity?.effort || settings.effort;
   if (effort) args.push("--effort", effort);
+
+  const nudge = settings.slack.nudge;
+  if (cancelKey && nudge?.livePrompt) {
+    const path = join(baseEnv.TMPDIR || tmpdir(), `kafu-nudge-${createHash("sha256").update(cancelKey).digest("hex").slice(0, 16)}.json`);
+    baseEnv.KAFU_NUDGE_FILE = path;
+    await setNudgeFile(cancelKey, path);
+    const live = peekNudgeRun(cancelKey);
+    if (live?.count) await writeNudgeFile(live, nudge).catch(() => {});
+    if (!isolationEnabled()) args.push("--settings", JSON.stringify({ hooks: nudgeHookSettings() }));
+  }
 
   let exec = await runClaudeStream(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs, spawnCwd, onChunk, onToolEvent, cancelKey);
   const primaryRateLimit = extractRateLimitMessage(exec.rawStdout, exec.stderr);

@@ -18,6 +18,9 @@ import {
   countWhip,
   dueLeaderboard,
   leaderboardText,
+  setNudgeFile,
+  writeNudgeFile,
+  NUDGE_HOOK_COMMAND,
 } from "../nudge";
 
 const cfg: NudgeConfig = parseNudge({
@@ -27,6 +30,7 @@ const cfg: NudgeConfig = parseNudge({
   cries: [["Hey!"], ["Okay okay!"], ["PLEASE!"]],
   doneText: "Finished already.",
   prompt: "{users} hurried you {times} ({count}).",
+  livePrompt: "{users} are hurrying you, {times} so far.",
   leaderboardChannel: "C0123456789",
   leaderboardTitle: "Hurry champs of {month}",
 })!;
@@ -49,6 +53,12 @@ describe("nudging a run", () => {
     expect(pickCry(cfg.cries, 2)).toBe("Okay okay!");
     expect(pickCry(cfg.cries, 9)).toBe("PLEASE!");
     expect(pickCry([], 1)).toBe("");
+  });
+
+  test("doesn't repeat the same cry twice in a row", () => {
+    const tiers = [["A", "B"]];
+    for (let i = 0; i < 20; i++) expect(pickCry(tiers, 5, Math.random, "A")).toBe("B");
+    expect(pickCry([["Only"]], 5, Math.random, "Only")).toBe("Only");
   });
 
   test("builds one message that grows with each nudge and shows only the bot's last line", () => {
@@ -89,6 +99,42 @@ describe("nudging a run", () => {
   test("keeps the bot's line short and can't ping anyone", () => {
     expect(currentNarration("Asking <!channel> and <@U123>")).toBe("Asking &lt;!channel&gt; and &lt;@U123&gt;");
     expect(currentNarration("x".repeat(300))).toHaveLength(158);
+  });
+});
+
+describe("nudging a run that is still working", () => {
+  function hook(file: string): string {
+    const out = Bun.spawnSync(["sh", "-c", NUDGE_HOOK_COMMAND], { env: { ...process.env, KAFU_NUDGE_FILE: file }, stdin: new TextEncoder().encode("{}") });
+    return out.stdout.toString().trim();
+  }
+
+  test("the hook hands the bot each new batch of nudges once, and the next turn only hears the rest", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "nudge-live-")), "n.json");
+    expect(hook(file)).toBe("");
+    const run = beginNudgeRun("live", "C1", "1.0", () => {});
+    await setNudgeFile("live", file);
+    recordWhip(run, "U1", cfg);
+    recordWhip(run, "U2", cfg);
+    await writeNudgeFile(run, cfg);
+    expect(JSON.parse(hook(file))).toEqual({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: "<@U1>, <@U2> are hurrying you, 2 times so far." } });
+    expect(hook(file)).toBe("");
+    recordWhip(run, "U1", cfg);
+    await writeNudgeFile(run, cfg);
+    await endNudgeRun("live");
+    expect(takePendingNudges("live")).toEqual({ count: 1, users: ["U1", "U2"] });
+    expect(hook(file)).toBe("");
+  });
+
+  test("writes nothing without a live prompt or after the run", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "nudge-live-")), "n.json");
+    const run = beginNudgeRun("quiet", "C1", "1.0", () => {});
+    await setNudgeFile("quiet", file);
+    recordWhip(run, "U1", cfg);
+    await writeNudgeFile(run, { ...cfg, livePrompt: "" });
+    expect(hook(file)).toBe("");
+    await endNudgeRun("quiet");
+    await writeNudgeFile(run, cfg);
+    expect(hook(file)).toBe("");
   });
 });
 

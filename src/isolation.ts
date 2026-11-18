@@ -2,6 +2,7 @@ import { existsSync, lstatSync } from "node:fs";
 import { chmod, chown, lchown, lstat, mkdir, readFile, readdir, readlink, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getSettings } from "./config";
+import { nudgeHookSettings } from "./nudge";
 
 const PROJECT_DIR = process.cwd();
 const KAFU_DIR = join(PROJECT_DIR, ".claude", "kafu");
@@ -393,6 +394,7 @@ export function guardSettings(repos: string[], runtime?: string, script?: string
   return {
     hooks: {
       PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: guardHookCommand(repos, runtime, script), timeout: 15 }] }],
+      ...nudgeHookSettings(),
     },
   };
 }

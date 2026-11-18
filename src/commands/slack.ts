@@ -27,7 +27,7 @@ import { dirname, extname, join, resolve, isAbsolute, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { fetchWithTimeout } from "../http";
 import { matchForward, dispatchForwardedInteraction } from "../interaction-forward";
-import { beginNudgeRun, endNudgeRun, nudgeRun, peekNudgeRun, recordWhip, whipMessage, buttonLabel, countBadge, nudgePrompt, takePendingNudges, countWhip, dueLeaderboard } from "../nudge";
+import { beginNudgeRun, endNudgeRun, nudgeRun, peekNudgeRun, recordWhip, writeNudgeFile, whipMessage, buttonLabel, countBadge, nudgePrompt, takePendingNudges, countWhip, dueLeaderboard } from "../nudge";
 
 const SLACK_DIRECTIVES_PATH = join(import.meta.dir, "..", "..", "prompts", "slack", "DIRECTIVES.md");
 let slackDirectivesPrompt: string | null = null;
@@ -1877,7 +1877,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
       clearInterval(statusRefreshInterval);
       if (progressTimer) clearInterval(progressTimer);
       stopMetaWatch();
-      endNudgeRun(cancelKey);
+      await endNudgeRun(cancelKey);
       if (progressTs) await updateInflight((runs) => runs.filter((r) => r.progressTs !== progressTs));
     }
 
@@ -2230,6 +2230,7 @@ async function handleBlockAction(payload: any): Promise<void> {
     run.queue = run.queue.then(async () => {
       recordWhip(run, user.id, nudge);
       void countWhip(user.id);
+      await writeNudgeFile(run, nudge).catch(() => {});
       if (nudge.reaction && message?.ts) void sendReaction(config.botToken, channelId, message.ts, nudge.reaction);
       const text = whipMessage(run, nudge);
       if (run.whipTs) await updateMessage(config.botToken, channelId, run.whipTs, text).catch(() => {});
