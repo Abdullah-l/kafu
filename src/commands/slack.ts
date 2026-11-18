@@ -368,17 +368,20 @@ const STOP_ACTION_ID = "cc_stop";
 const NUDGE_ACTION_ID = "cc_nudge";
 
 interface LiveRun {
-  activity: string[];
-  startedAt: number;
+  text: string;
 }
 
 const liveRuns = new Map<string, LiveRun>();
 
-export function nudgeReply(run: LiveRun, now = Date.now()): string {
-  const steps = run.activity.filter((l) => l.startsWith("●"));
-  const current = steps.at(-1)?.replace(/^●\s*/, "");
-  const count = `${steps.length} step${steps.length === 1 ? "" : "s"}`;
-  return `Ow! Still on it, ${formatElapsed(now - run.startedAt)} in and ${count} so far.${current ? ` Right now: \`${current.replace(/`/g, "'")}\`` : " Still thinking it through."}`;
+export function currentNarration(text: string): string {
+  const line = text.split("\n").map((l) => l.trim()).filter(Boolean).at(-1) ?? "";
+  const plain = line.replace(/^[>#\s]+/, "").replace(/[`*]/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+  return plain.length > 160 ? `${plain.slice(0, 157)}…` : plain;
+}
+
+export function nudgeReply(run: LiveRun, cries: string[], pick = Math.random): string {
+  const cry = cries.length ? cries[Math.floor(pick() * cries.length) % cries.length] : "";
+  return [cry, currentNarration(run.text) || "Still thinking."].filter(Boolean).join(" ");
 }
 
 export function formatElapsed(ms: number): string {
@@ -1131,11 +1134,12 @@ async function uploadFile(
   filePath: string,
   threadTs?: string,
   title?: string,
+  comment?: string,
 ): Promise<void> {
   const file = Bun.file(filePath);
   if (!(await file.exists())) {
     debugLog(`Upload failed: file not found: ${filePath}`);
-    return;
+    throw new Error(`file not found: ${filePath}`);
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -1169,6 +1173,7 @@ async function uploadFile(
     files: [fileObj],
     channel_id: channelId,
     ...(threadTs ? { thread_ts: threadTs } : {}),
+    ...(comment ? { initial_comment: comment } : {}),
   });
 
   console.log(`[Slack] File uploaded: ${filename} to ${channelId}`);
@@ -1355,12 +1360,13 @@ async function runForUser(opts: {
   sessionThreadId?: string;
   agentName?: string;
   onToolEvent?: (line: string) => void;
+  onChunk?: (text: string) => void;
   cancelKey?: string;
   identity?: RunIdentity;
   attachmentPaths?: string[];
 }) {
   const identity = opts.identity ? { ...opts.identity, readable: opts.attachmentPaths ?? [] } : undefined;
-  return runUserMessage("slack", opts.prompt, opts.sessionThreadId, opts.agentName, undefined, opts.onToolEvent, undefined, opts.cancelKey, identity);
+  return runUserMessage("slack", opts.prompt, opts.sessionThreadId, opts.agentName, opts.onChunk, opts.onToolEvent, undefined, opts.cancelKey, identity);
 }
 
 const watchState = new WatchState();
@@ -1796,7 +1802,11 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
     const activity: string[] = [];
     const startedAt = Date.now();
     const runMeta: RunMeta = {};
-    liveRuns.set(cancelKey, { activity, startedAt });
+    const live: LiveRun = { text: "" };
+    liveRuns.set(cancelKey, live);
+    const onChunk = (chunk: string) => {
+      live.text = chunk === "\n" ? "" : (live.text + chunk).slice(-2000);
+    };
     const postUsername = await postAsRequester(config.botToken, actingUserId);
     const stream = userId && botTeamId
       ? await TaskStream.start({ token: config.botToken, channel: channelId, threadTs: replyThreadTs, recipientUserId: userId, recipientTeamId: (event as { team?: string }).team ?? botTeamId, title: "Working on it", username: postUsername })
@@ -1852,6 +1862,7 @@ async function handleMessage(event: SlackMessage, watched?: WatchedRun): Promise
         sessionThreadId,
         agentName,
         onToolEvent,
+        onChunk,
         cancelKey,
         identity,
         attachmentPaths: [imagePath, ...earlierImages.map((i) => i.path), ...linkedThreads.images.map((i) => i.path), ...linkedThreads.files, ...docPaths.map((d) => d.path)].filter((p): p is string => !!p),
@@ -2202,8 +2213,10 @@ async function handleBlockAction(payload: any): Promise<void> {
       return;
     }
     if (config.nudge.reaction && message?.ts) await sendReaction(config.botToken, channelId, message.ts, config.nudge.reaction);
-    await sendMessage(config.botToken, channelId, `${config.nudge.reaction ? `:${config.nudge.reaction}: ` : ""}<@${user.id}>: ${config.nudge.message}`, threadTs).catch(() => {});
-    await sendMessage(config.botToken, channelId, nudgeReply(live), threadTs).catch(() => {});
+    const shout = `${config.nudge.reaction ? `:${config.nudge.reaction}: ` : ""}<@${user.id}>: ${config.nudge.message}`;
+    const sent = config.nudge.sound ? await uploadFile(config.botToken, channelId, config.nudge.sound, threadTs, undefined, shout).then(() => true, () => false) : false;
+    if (!sent) await sendMessage(config.botToken, channelId, shout, threadTs).catch(() => {});
+    await sendMessage(config.botToken, channelId, nudgeReply(live, config.nudge.cries), threadTs).catch(() => {});
     return;
   }
 

@@ -105,16 +105,20 @@ export interface NudgeConfig {
   label: string;
   message: string;
   reaction: string;
+  cries: string[];
+  sound: string;
 }
 
 export function parseNudge(value: unknown): NudgeConfig | null {
   if (!value || typeof value !== "object") return null;
-  const { label, message, reaction } = value as Record<string, unknown>;
+  const { label, message, reaction, cries, sound } = value as Record<string, unknown>;
   if (typeof label !== "string" || !label.trim() || typeof message !== "string" || !message.trim()) return null;
   return {
     label: label.trim().slice(0, 30),
     message: message.trim().slice(0, 200),
     reaction: typeof reaction === "string" && /^:?[a-z0-9_+'-]+:?$/i.test(reaction.trim()) ? reaction.trim().replace(/:/g, "") : "",
+    cries: Array.isArray(cries) ? cries.filter((c): c is string => typeof c === "string" && !!c.trim()).map((c) => c.trim().slice(0, 40)) : [],
+    sound: typeof sound === "string" && isAbsolute(sound.trim()) ? sound.trim() : "",
   };
 }
 

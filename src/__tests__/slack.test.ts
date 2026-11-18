@@ -9,6 +9,7 @@ import {
   formatElapsed,
   runStatusLine,
   nudgeReply,
+  currentNarration,
   markdownToMrkdwn,
 } from "../commands/slack";
 import { parseNudge } from "../config";
@@ -158,16 +159,22 @@ describe("context window", () => {
 
 describe("nudge button", () => {
   test("parses the nudge setting and drops bad ones", () => {
-    expect(parseNudge({ label: ":rocket: Hurry", message: "ARE WE THERE YET?", reaction: ":rocket:" })).toEqual({ label: ":rocket: Hurry", message: "ARE WE THERE YET?", reaction: "rocket" });
-    expect(parseNudge({ label: "Hurry", message: "Go", reaction: "not an emoji!" })?.reaction).toBe("");
+    expect(parseNudge({ label: ":rocket: Hurry", message: "ARE WE THERE YET?", reaction: ":rocket:", cries: ["Hey!", "", 3], sound: "/opt/sounds/beep.mp3" })).toEqual({ label: ":rocket: Hurry", message: "ARE WE THERE YET?", reaction: "rocket", cries: ["Hey!"], sound: "/opt/sounds/beep.mp3" });
+    expect(parseNudge({ label: "Hurry", message: "Go", reaction: "not an emoji!", sound: "beep.mp3" })).toEqual({ label: "Hurry", message: "Go", reaction: "", cries: [], sound: "" });
     expect(parseNudge({ label: "", message: "Go" })).toBeNull();
     expect(parseNudge({ label: "Hurry" })).toBeNull();
     expect(parseNudge(undefined)).toBeNull();
   });
 
-  test("answers with the time, step count and current step", () => {
-    const run = { activity: ["● Read(src/app.ts)", "  ⎿ 40 lines", "● Bash(bun test)"], startedAt: 0 };
-    expect(nudgeReply(run, 125_000)).toBe("Ow! Still on it, 2m 05s in and 2 steps so far. Right now: `Bash(bun test)`");
-    expect(nudgeReply({ activity: [], startedAt: 0 }, 4_000)).toBe("Ow! Still on it, 4s in and 0 steps so far. Still thinking it through.");
+  test("answers with a cry and only the latest thing the bot said, never its tools", () => {
+    const run = { text: "Found the job.\nNow checking the logs for `Bobby`." };
+    expect(nudgeReply(run, ["Ow!", "Hey!"], () => 0.9)).toBe("Hey! Now checking the logs for Bobby.");
+    expect(nudgeReply(run, [])).toBe("Now checking the logs for Bobby.");
+    expect(nudgeReply({ text: "" }, ["Ow!"], () => 0)).toBe("Ow! Still thinking.");
+  });
+
+  test("keeps the line short and can't ping anyone", () => {
+    expect(currentNarration("Asking <!channel> and <@U123>")).toBe("Asking &lt;!channel&gt; and &lt;@U123&gt;");
+    expect(currentNarration("x".repeat(300))).toHaveLength(158);
   });
 });
